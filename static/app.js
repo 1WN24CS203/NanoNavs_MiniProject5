@@ -1486,9 +1486,9 @@ async function fileMunicipalComplaint(anomalyId) {
       body: JSON.stringify({ anomaly_id: anomalyId })
     });
     const data = await res.json();
-    if (data.status === 'created' || data.complaint) {
-      const c = data.complaint;
-      alert(`Civic Work Order Generated:\n${c.ticket_number}\nAssigned: ${c.department}\nPriority: ${c.priority.toUpperCase()}`);
+    if (data.status === 'created' || data.complaint || data.ticket_number) {
+      const c = data.complaint || data;
+      alert(`Civic Work Order Generated:\n${c.ticket_number}\nAssigned: ${c.department}\nPriority: ${(c.priority || 'HIGH').toUpperCase()}`);
       document.getElementById('anomaly-sheet').classList.remove('open');
       openComplaintsModal('all');
     }

@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#09090b">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="NanoNavs">
+  <title>NanoNavs — Autonomous Road Intelligence</title>
+  
+  <link rel="manifest" href="/manifest.json">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+  <link rel="stylesheet" href="/static/style.css">
+  
+  <!-- Lucide Vector Icons -->
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+</head>
+<body>
+
+  <div id="root">
+    <!-- Precision Header / Navbar -->
+    <header class="navbar">
+      <div class="nav-brand">
+        <div class="brand-symbol">
+          <i data-lucide="activity" style="width: 16px; height: 16px; stroke-width: 2.2;"></i>
+        </div>
+        <div class="brand-text">
+          <span>NanoNavs</span>
+          <span class="brand-badge">2.0</span>
+        </div>
+      </div>
+
+      <div class="nav-cluster">
+        <div id="connection-badge" class="status-pill">
+          <span class="status-indicator"></span>
+          <span id="connection-text">Live Sync</span>
+        </div>
+
+        <div class="status-pill" title="Active telemetry units on universal map">
+          <i data-lucide="navigation-2" style="width: 12px; height: 12px; stroke-width: 2;"></i>
+          <span id="active-drivers-badge">0 Active</span>
+        </div>
+
+        <button id="complaints-modal-btn" class="btn-ghost-icon" title="Municipal Civic Work Orders">
+          <i data-lucide="clipboard-list" style="width: 16px; height: 16px;"></i>
+        </button>
+
+        <button id="qr-modal-btn" class="btn-ghost-icon" title="Mobile QR Pair">
+          <i data-lucide="smartphone" style="width: 16px; height: 16px;"></i>
+        </button>
+      </div>
+    </header>
+
+    <!-- Map Stage Viewport -->
+    <div class="viewport">
+      <div id="map"></div>
+
+      <!-- Route & Telemetry Drawer Card -->
+      <div id="route-card" class="route-drawer-card">
+        <div class="card-title-bar">
+          <span class="card-heading">
+            <i data-lucide="navigation" style="width: 14px; height: 14px;"></i>
+            Mission Path
+          </span>
+          <button id="toggle-card-btn" class="collapse-trigger" title="Collapse / Expand">
+            <i data-lucide="chevron-up" id="toggle-chevron" style="width: 16px; height: 16px;"></i>
+          </button>
+        </div>
+
+        <div class="input-stack">
+          <!-- Origin Field -->
+          <div class="field-group">
+            <span class="field-glyph">
+              <i data-lucide="circle-dot" style="width: 14px; height: 14px; color: var(--status-emerald);"></i>
+            </span>
+            <input type="text" id="start-input" class="field-input" placeholder="Start: tap map, search, or GPS" autocomplete="off">
+            <button id="btn-gps-start" class="field-action-btn" title="Lock Current GPS">
+              <i data-lucide="crosshair" style="width: 14px; height: 14px;"></i>
+            </button>
+            <button id="btn-pick-start" class="field-action-btn" title="Pick on Map">
+              <i data-lucide="map-pin" style="width: 14px; height: 14px;"></i>
+            </button>
+          </div>
+          <div id="start-dropdown" class="autocomplete-menu"></div>
+
+          <!-- Destination Field -->
+          <div class="field-group">
+            <span class="field-glyph">
+              <i data-lucide="flag" style="width: 14px; height: 14px; color: var(--accent-cyan);"></i>
+            </span>
+            <input type="text" id="dest-input" class="field-input" placeholder="Destination: tap map or search" autocomplete="off">
+            <button id="btn-swap-route" class="field-action-btn" title="Reverse Route">
+              <i data-lucide="arrow-up-down" style="width: 14px; height: 14px;"></i>
+            </button>
+            <button id="btn-pick-dest" class="field-action-btn" title="Pick on Map">
+              <i data-lucide="map-pin" style="width: 14px; height: 14px;"></i>
+            </button>
+          </div>
+          <div id="dest-dropdown" class="autocomplete-menu"></div>
+        </div>
+
+        <!-- Presets -->
+        <div class="preset-strip">
+          <button class="chip-item" data-preset="bmsce">BMSCE</button>
+          <button class="chip-item" data-preset="silk-board">Silk Board</button>
+          <button class="chip-item" data-preset="koramangala">Koramangala</button>
+          <button class="chip-item" data-preset="ecity">Electronic City</button>
+          <button class="chip-item" data-preset="airport">KIA Airport</button>
+        </div>
+
+        <!-- Calculated Telemetry Summary -->
+        <div class="telemetry-row">
+          <span>Distance: <span id="route-dist-val" class="telemetry-val">-- km</span></span>
+          <span>ETA: <span id="route-time-val" class="telemetry-val">-- min</span></span>
+          <span>Engine: <span id="route-source-val" class="telemetry-val">OSRM</span></span>
+        </div>
+
+        <!-- Operational Mode Tabs -->
+        <div class="segmented-tabs">
+          <div id="mode-phone" class="tab-option active">
+            <i data-lucide="smartphone" style="width: 14px; height: 14px;"></i>
+            Hardware Sensors
+          </div>
+          <div id="mode-sim" class="tab-option">
+            <i data-lucide="cpu" style="width: 14px; height: 14px;"></i>
+            Drive Simulator
+          </div>
+        </div>
+
+        <!-- Simulation Speed Controls -->
+        <div id="sim-controls" class="slider-control-block">
+          <div class="slider-header">
+            <span>Simulation Velocity</span>
+            <span id="sim-speed-val" class="telemetry-val">45 km/h</span>
+          </div>
+          <input type="range" id="sim-speed-slider" class="speed-slider" min="20" max="90" value="45" step="5">
+        </div>
+
+        <!-- Primary Launch Trigger -->
+        <button id="btn-start-trip" class="btn-launch">
+          <i data-lucide="play" style="width: 16px; height: 16px; fill: currentColor;"></i>
+          INITIALIZE ACQUISITION
+        </button>
+      </div>
+
+      <!-- Active Cockpit HUD -->
+      <div id="driver-hud" class="cockpit-hud">
+        <div class="hud-cluster">
+          <div class="speedometer-block">
+            <div class="speed-display">
+              <span id="hud-speed" class="speed-digit">0</span>
+              <span class="speed-unit">km/h</span>
+            </div>
+          </div>
+
+          <div class="hud-metrics-grid">
+            <div>
+              <div class="metric-cell-label">Vertical G</div>
+              <div id="hud-impact-g" class="metric-cell-val">1.00g</div>
+            </div>
+            <div>
+              <div class="metric-cell-label">Road Index</div>
+              <div id="hud-road-score" class="metric-cell-val quality-optimum">100</div>
+            </div>
+            <div>
+              <div class="metric-cell-label">Anomalies</div>
+              <div id="hud-anomaly-count" class="metric-cell-val" style="color: var(--status-rose);">0</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Waveform Oscilloscope -->
+        <div class="oscilloscope-stage">
+          <canvas id="vibrationCanvas"></canvas>
+          <span class="oscilloscope-meta">ACCEL Z-AXIS [10Hz]</span>
+        </div>
+
+        <!-- Edge Sensor Telemetry Streamer Status -->
+        <div class="edge-streamer-strip">
+          <div style="display: flex; align-items: center; gap: 6px;">
+            <span class="edge-stream-dot"></span>
+            <span>EDGE SENSOR RIG</span>
+          </div>
+          <span id="edge-packet-count">0 pkts streamed</span>
+          <span style="color: var(--status-emerald); font-weight: 600;">SERVER ENGINE SYNC</span>
+        </div>
+
+        <!-- Handling Guard Notice -->
+        <div id="guard-banner" class="guard-notification">
+          <i data-lucide="shield-alert" style="width: 14px; height: 14px; flex-shrink: 0;"></i>
+          <span>Handling motion detected — surface anomaly suppressed</span>
+        </div>
+
+        <!-- HUD Controls -->
+        <div class="cockpit-controls">
+          <button id="btn-quick-report" class="btn-secondary-action">
+            <i data-lucide="alert-triangle" style="width: 14px; height: 14px; color: var(--status-rose);"></i>
+            Flag Defect
+          </button>
+          <button id="btn-stop-trip" class="btn-launch btn-terminate" style="margin-top: 0; flex: 1.2;">
+            <i data-lucide="square" style="width: 15px; height: 15px; fill: currentColor;"></i>
+            TERMINATE TRIP
+          </button>
+        </div>
+      </div>
+
+      <!-- Precision Dock (Right) -->
+      <div class="dock-controls">
+        <button id="ctrl-center-btn" class="dock-btn" title="Center on Vehicle">
+          <i data-lucide="crosshair" style="width: 16px; height: 16px;"></i>
+        </button>
+        <button id="ctrl-refresh-btn" class="dock-btn" title="Refresh Global State">
+          <i data-lucide="refresh-cw" style="width: 16px; height: 16px;"></i>
+        </button>
+        <button id="ctrl-clear-btn" class="dock-btn" title="Reset Route">
+          <i data-lucide="rotate-ccw" style="width: 16px; height: 16px;"></i>
+        </button>
+      </div>
+
+      <!-- Segmented Anomaly Filter Capsule -->
+      <div class="filter-dock">
+        <button class="filter-dock-pill active" data-filter="all">All Surface</button>
+        <button class="filter-dock-pill" data-filter="pothole">Potholes</button>
+        <button class="filter-dock-pill" data-filter="speed_bump">Speed Bumps</button>
+        <button class="filter-dock-pill" data-filter="crack">Cracks</button>
+        <button class="filter-dock-pill" data-filter="surface_depression">Depressions</button>
+      </div>
+
+      <!-- Anomaly Detail Drawer -->
+      <div id="anomaly-sheet" class="sheet-overlay">
+        <div class="sheet-handle-bar"></div>
+        <div class="sheet-title-group">
+          <div>
+            <div class="sheet-main-title">
+              <span id="sheet-type-icon">
+                <i data-lucide="alert-circle" style="width: 18px; height: 18px;"></i>
+              </span>
+              <span id="sheet-type-text">Pothole Surface Defect</span>
+            </div>
+            <p id="sheet-address" class="sheet-sub-address">Coordinates</p>
+          </div>
+          <button id="close-sheet-btn" class="btn-ghost-icon">
+            <i data-lucide="x" style="width: 16px; height: 16px;"></i>
+          </button>
+        </div>
+
+        <div class="sheet-data-grid">
+          <div class="data-card-cell">
+            <div class="cell-caption">Impact Force</div>
+            <div id="sheet-peak-g" class="cell-figure">1.82 g</div>
+          </div>
+          <div class="data-card-cell">
+            <div class="cell-caption">Velocity</div>
+            <div id="sheet-speed" class="cell-figure">38 km/h</div>
+          </div>
+          <div class="data-card-cell">
+            <div class="cell-caption">Confidence</div>
+            <div id="sheet-conf" class="cell-figure">94%</div>
+          </div>
+          <div class="data-card-cell">
+            <div class="cell-caption">Verifications</div>
+            <div id="sheet-verified" class="cell-figure">14 units</div>
+          </div>
+        </div>
+
+        <div class="sheet-button-strip">
+          <button id="btn-verify-anomaly" class="btn-launch" style="margin-top: 0; background: var(--status-emerald); color: #fff;">
+            <i data-lucide="check" style="width: 16px; height: 16px;"></i>
+            Verify Defect
+          </button>
+          <button id="btn-file-complaint" class="btn-secondary-action" style="border-color: var(--status-amber); color: #fbbf24;">
+            <i data-lucide="file-plus" style="width: 15px; height: 15px;"></i>
+            File BBMP Ticket
+          </button>
+          <button id="btn-resolve-anomaly" class="btn-secondary-action">
+            <i data-lucide="check-check" style="width: 16px; height: 16px;"></i>
+            Mark Repaired
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Trip Report Modal -->
+    <div id="report-modal" class="dialog-backdrop">
+      <div class="dialog-window">
+        <div class="dialog-header">
+          <h3 class="dialog-title">Mission Report</h3>
+          <button id="close-report-btn" class="btn-ghost-icon">
+            <i data-lucide="x" style="width: 16px; height: 16px;"></i>
+          </button>
+        </div>
+
+        <div class="score-hero-container">
+          <div id="report-score-val" class="score-hero-num">88</div>
+          <div class="score-hero-label">Road Quality Index [0-100]</div>
+        </div>
+
+        <div class="sheet-data-grid">
+          <div class="data-card-cell">
+            <div class="cell-caption">Distance</div>
+            <div id="report-dist-val" class="cell-figure">0.0 km</div>
+          </div>
+          <div class="data-card-cell">
+            <div class="cell-caption">Duration</div>
+            <div id="report-duration-val" class="cell-figure">0 min</div>
+          </div>
+          <div class="data-card-cell">
+            <div class="cell-caption">Anomalies Detected</div>
+            <div id="report-anomaly-val" class="cell-figure">0</div>
+          </div>
+          <div class="data-card-cell">
+            <div class="cell-caption">State</div>
+            <div class="cell-figure" style="color: var(--status-emerald);">Universal Synced</div>
+          </div>
+        </div>
+
+        <div style="margin-top: 16px;">
+          <div class="cell-caption">Incident Telemetry Summary</div>
+          <div id="report-summary-text" class="log-box">Report log...</div>
+        </div>
+
+        <div id="ai-narrative-section" style="margin-top: 14px; display: none;">
+          <div class="cell-caption" style="color: var(--accent-cyan); display: flex; align-items: center; gap: 4px;">
+            <i data-lucide="sparkles" style="width: 12px; height: 12px;"></i>
+            Gemini AI Incident Analysis
+          </div>
+          <div id="report-ai-text" class="log-box" style="border-left: 2px solid var(--accent-cyan);"></div>
+        </div>
+
+        <div class="sheet-button-strip">
+          <button id="btn-download-json" class="btn-secondary-action">
+            <i data-lucide="download" style="width: 14px; height: 14px;"></i>
+            Export JSON
+          </button>
+          <button id="btn-close-modal" class="btn-launch" style="margin-top: 0; flex: 1.2;">Done</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- QR Code Pair Modal -->
+    <div id="qr-modal" class="dialog-backdrop">
+      <div class="dialog-window" style="text-align: center;">
+        <div class="dialog-header">
+          <h3 class="dialog-title">Smartphone Pairing</h3>
+          <button id="close-qr-btn" class="btn-ghost-icon">
+            <i data-lucide="x" style="width: 16px; height: 16px;"></i>
+          </button>
+        </div>
+
+        <p style="color: var(--foreground-muted); font-size: 0.85rem; line-height: 1.5; margin-bottom: 16px;">
+          Scan with your smartphone camera to connect live hardware sensors over Wi-Fi.
+        </p>
+
+        <div style="display: flex; justify-content: center; margin: 12px 0;">
+          <img id="qr-img" style="width: 200px; height: 200px; border-radius: 12px; padding: 6px; background: #fff;" alt="Pairing QR">
+        </div>
+
+        <div style="display: flex; gap: 8px; margin-top: 14px;">
+          <input type="text" id="mobile-url-input" class="field-input" readonly style="background: var(--background); border: 1px solid var(--border); border-radius: 6px; font-family: var(--font-mono); font-size: 0.8rem;">
+          <button id="btn-copy-url" class="btn-secondary-action" style="flex: none;">Copy</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Municipal Civic Complaints / Work Orders Modal -->
+    <div id="complaints-modal" class="dialog-backdrop">
+      <div class="dialog-window complaints-window">
+        <div class="dialog-header">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <i data-lucide="file-check-2" style="width: 18px; height: 18px; color: var(--accent-cyan);"></i>
+            <h3 class="dialog-title">Municipal Civic Work Orders</h3>
+          </div>
+          <button id="close-complaints-btn" class="btn-ghost-icon">
+            <i data-lucide="x" style="width: 16px; height: 16px;"></i>
+          </button>
+        </div>
+
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 10px; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
+          <p style="color: var(--foreground-muted); font-size: 0.8rem;">
+            Central server-dispatched civic public works tickets (BBMP & Municipal Infrastructure)
+          </p>
+          <div class="filter-dock" style="position: static; transform: none; padding: 2px;">
+            <button class="filter-dock-pill active" data-complaint-filter="all">All</button>
+            <button class="filter-dock-pill" data-complaint-filter="Submitted">Submitted</button>
+            <button class="filter-dock-pill" data-complaint-filter="In Progress">Active</button>
+            <button class="filter-dock-pill" data-complaint-filter="Resolved">Resolved</button>
+          </div>
+        </div>
+
+        <div id="tickets-container" class="ticket-list">
+          <div style="text-align: center; color: var(--foreground-dim); padding: 30px;">Loading civic tickets...</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script src="/static/audio-keepalive.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>

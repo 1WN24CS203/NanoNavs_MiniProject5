@@ -6,8 +6,8 @@
   <meta name="theme-color" content="#09090b">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="NanoNavs">
-  <title>NanoNavs — Autonomous Road Intelligence</title>
+  <meta name="apple-mobile-web-app-title" content="NanoNavs Civic">
+  <title>NanoNavs — Civic Command & Road Data Manager</title>
   
   <link rel="manifest" href="/manifest.json">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
@@ -18,7 +18,67 @@
 </head>
 <body>
 
-  <div id="root">
+  <!-- =========================================================================
+       1. CIVIC OFFICER AUTHENTICATION GATE (AUTHENTICATE FIRST)
+       ========================================================================= -->
+  <div id="officer-auth-gate" class="auth-gate-overlay">
+    <div class="auth-gate-card">
+      <div class="auth-brand-badge">
+        <div class="brand-symbol" style="width: 36px; height: 36px; border-radius: 10px;">
+          <i data-lucide="shield-check" style="width: 20px; height: 20px; color: var(--accent-cyan);"></i>
+        </div>
+        <div>
+          <h2 style="font-size: 1.25rem; font-weight: 700; color: #fff;">NanoNavs Civic Command</h2>
+          <span style="font-size: 0.75rem; color: var(--foreground-muted); letter-spacing: 0.5px;">
+            MUNICIPAL ROAD DATA MANAGER & BBMP INFRASTRUCTURE
+          </span>
+        </div>
+      </div>
+
+      <p style="font-size: 0.82rem; color: var(--foreground-muted); margin: 16px 0 20px; line-height: 1.5;">
+        Restricted Officer Access. Authenticate to inspect live road telemetry, audit crowdsourced multi-pass anomalies, and dispatch municipal work orders.
+      </p>
+
+      <div class="auth-tabs" style="display: flex; gap: 8px; margin-bottom: 16px;">
+        <button id="gate-login-tab" class="seg-btn active" style="flex: 1; padding: 8px;">Officer Login</button>
+        <button id="gate-signup-tab" class="seg-btn" style="flex: 1; padding: 8px;">Register Officer</button>
+      </div>
+
+      <form id="officer-auth-form" style="display: flex; flex-direction: column; gap: 14px;">
+        <div id="gate-name-wrap" style="display: none;">
+          <label class="field-label">Full Officer Name & Designation</label>
+          <input type="text" id="gate-fullname" class="field-input" placeholder="e.g. Inspector Prathyush (BBMP South)">
+        </div>
+
+        <div>
+          <label class="field-label">Officer Username or Email</label>
+          <input type="text" id="gate-identity" class="field-input" placeholder="admin or officer@bbmp.gov.in" required autocomplete="username">
+        </div>
+
+        <div>
+          <label class="field-label">Access Password</label>
+          <input type="password" id="gate-password" class="field-input" placeholder="••••••••" required autocomplete="current-password">
+        </div>
+
+        <div id="gate-error" style="display: none; font-size: 0.78rem; color: var(--status-rose); background: rgba(244, 63, 94, 0.1); padding: 8px 12px; border-radius: 6px; border: 1px solid rgba(244, 63, 94, 0.25);"></div>
+
+        <button type="submit" id="btn-gate-submit" class="btn-launch" style="margin-top: 6px;">
+          Authenticate & Enter Command Center
+        </button>
+
+        <button type="button" id="btn-demo-officer" class="btn-ghost-action" style="margin-top: 2px;">
+          <i data-lucide="key" style="width: 13px; height: 13px; color: var(--accent-cyan);"></i>
+          Quick Demo Officer Login (admin / admin123)
+        </button>
+      </form>
+    </div>
+  </div>
+
+
+  <!-- =========================================================================
+       2. MAIN CIVIC COMMAND & DATA MANAGEMENT WORKSTATION
+       ========================================================================= -->
+  <div id="root" style="display: none;">
     <!-- Precision Header / Navbar -->
     <header class="navbar">
       <div class="nav-brand">
@@ -27,358 +87,259 @@
         </div>
         <div class="brand-text">
           <span>NanoNavs</span>
-          <span class="brand-badge">CIVIC COMMAND</span>
+          <span class="brand-badge">CIVIC DATA MANAGER</span>
         </div>
       </div>
 
       <div class="nav-cluster">
-        <a href="/mobile" id="btn-open-mobile-app" class="status-pill" style="text-decoration: none; color: var(--foreground); cursor: pointer; border-color: var(--accent-cyan);" title="Open Driver Mobile App">
+        <!-- Direct Phone App Launcher -->
+        <a href="/mobile" id="btn-open-mobile-app" class="status-pill highlight" style="text-decoration: none; color: var(--foreground); cursor: pointer; border-color: var(--accent-cyan);" title="Open Dedicated Driver Smartphone App">
           <i data-lucide="smartphone" style="width: 13px; height: 13px; color: var(--accent-cyan);"></i>
-          <span>Driver App</span>
+          <span>Driver App ↗</span>
         </a>
 
+        <!-- Central Sync Status -->
         <div id="connection-badge" class="status-pill">
           <span class="status-indicator"></span>
-          <span id="connection-text">Live Sync</span>
+          <span id="connection-text">Central Engine Sync</span>
         </div>
 
-        <div class="status-pill" title="Active telemetry units on universal map">
-          <i data-lucide="navigation-2" style="width: 12px; height: 12px; stroke-width: 2;"></i>
-          <span id="active-drivers-badge">0 Active</span>
+        <!-- Fleet Radar Units Count -->
+        <div class="status-pill" title="Active citizen driver units streaming telemetry">
+          <i data-lucide="radio" style="width: 12px; height: 12px; stroke-width: 2; color: var(--accent-cyan);"></i>
+          <span id="active-drivers-badge">0 Fleet Units Online</span>
         </div>
 
-        <button id="complaints-modal-btn" class="btn-ghost-icon" title="Municipal Civic Work Orders">
+        <!-- Automated System Verification Test Runner -->
+        <button id="btn-run-audit" class="btn-ghost-icon" title="Run Automated Verification Audit on Municipal Data">
+          <i data-lucide="check-check" style="width: 16px; height: 16px; color: var(--status-emerald);"></i>
+        </button>
+
+        <!-- Municipal Work Orders Button -->
+        <button id="complaints-modal-btn" class="btn-ghost-icon" title="Municipal Civic Work Orders (BBMP)">
           <i data-lucide="clipboard-list" style="width: 16px; height: 16px;"></i>
         </button>
 
-        <button id="qr-modal-btn" class="btn-ghost-icon" title="Mobile QR Pair">
-          <i data-lucide="qr-code" style="width: 16px; height: 16px;"></i>
-        </button>
-
-        <button id="auth-pc-btn" class="btn-ghost-icon" title="Civic Officer Access">
-          <i data-lucide="shield-check" style="width: 16px; height: 16px;"></i>
-        </button>
+        <!-- Officer Profile & Logout -->
+        <div class="officer-profile-pill">
+          <span id="officer-display-name" style="font-size: 0.78rem; font-weight: 600; color: #fff;">Officer: Admin</span>
+          <button id="btn-officer-logout" class="icon-btn-sm" title="Sign Out">
+            <i data-lucide="log-out" style="width: 13px; height: 13px;"></i>
+          </button>
+        </div>
       </div>
     </header>
 
-    <!-- Map Stage Viewport -->
+    <!-- Main Viewport (Split Workstation) -->
     <div class="viewport">
+      
+      <!-- Leaflet Universal Road Map -->
       <div id="map"></div>
 
-      <!-- Route & Telemetry Drawer Card -->
-      <div id="route-card" class="route-drawer-card">
-        <div class="card-title-bar">
-          <span class="card-heading">
-            <i data-lucide="navigation" style="width: 14px; height: 14px;"></i>
-            Mission Path
-          </span>
-          <button id="toggle-card-btn" class="collapse-trigger" title="Collapse / Expand">
-            <i data-lucide="chevron-up" id="toggle-chevron" style="width: 16px; height: 16px;"></i>
+      <!-- =======================================================================
+           CIVIC DATA MANAGEMENT DOCK (LEFT SIDE PANEL)
+           ======================================================================= -->
+      <aside id="civic-data-dock" class="civic-data-dock">
+        <!-- Dock Header -->
+        <div class="dock-header">
+          <div style="display: flex; align-items: center; justify-content: space-between;">
+            <div>
+              <span class="dock-title">MUNICIPAL ROAD DATA MANAGER</span>
+              <p class="dock-sub">Crowdsourced Telemetry Triage & Verification</p>
+            </div>
+            <button id="btn-toggle-dock" class="icon-btn-sm" title="Collapse Panel">
+              <i data-lucide="chevron-left" id="dock-chevron-icon" style="width: 14px; height: 14px;"></i>
+            </button>
+          </div>
+
+          <!-- 4 Municipal KPI Summary Cards -->
+          <div class="municipal-kpi-grid">
+            <div class="kpi-card">
+              <span class="kpi-label">Audited KM</span>
+              <span id="kpi-km" class="kpi-val">--</span>
+            </div>
+            <div class="kpi-card">
+              <span class="kpi-label">Verified Defects</span>
+              <span id="kpi-defects" class="kpi-val highlight">--</span>
+            </div>
+            <div class="kpi-card">
+              <span class="kpi-label">City Health PCI</span>
+              <span id="kpi-pci" class="kpi-val emerald">--</span>
+            </div>
+            <div class="kpi-card">
+              <span class="kpi-label">Open Work Orders</span>
+              <span id="kpi-orders" class="kpi-val rose">--</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Dock Segmented Tabs -->
+        <div class="dock-tabs">
+          <button class="dock-tab-btn active" data-dock-tab="hazards">
+            <i data-lucide="alert-triangle" style="width: 13px; height: 13px;"></i>
+            Verified Defects
+          </button>
+          <button class="dock-tab-btn" data-dock-tab="fleet">
+            <i data-lucide="navigation-2" style="width: 13px; height: 13px;"></i>
+            Fleet Radar (<span id="fleet-count-tab">0</span>)
+          </button>
+          <button class="dock-tab-btn" data-dock-tab="audit">
+            <i data-lucide="shield-check" style="width: 13px; height: 13px;"></i>
+            Verification Audit
           </button>
         </div>
 
-        <div class="input-stack">
-          <!-- Origin Field -->
-          <div class="field-group">
-            <span class="field-glyph">
-              <i data-lucide="circle-dot" style="width: 14px; height: 14px; color: var(--status-emerald);"></i>
-            </span>
-            <input type="text" id="start-input" class="field-input" placeholder="Start: tap map, search, or GPS" autocomplete="off">
-            <button id="btn-gps-start" class="field-action-btn" title="Lock Current GPS">
-              <i data-lucide="crosshair" style="width: 14px; height: 14px;"></i>
+        <!-- TAB 1: VERIFIED DEFECTS CATALOG -->
+        <div id="dock-tab-hazards" class="dock-tab-content active">
+          <!-- Search & Filter Bar -->
+          <div class="dock-search-wrap">
+            <i data-lucide="search" style="width: 13px; height: 13px; color: var(--foreground-dim);"></i>
+            <input type="text" id="hazard-search-input" class="dock-search-input" placeholder="Search street, coordinate, or defect ID...">
+          </div>
+
+          <!-- Severity Filter Chips -->
+          <div class="filter-pill-row">
+            <button class="filter-pill active" data-filter="all">All</button>
+            <button class="filter-pill" data-filter="pothole">Potholes</button>
+            <button class="filter-pill" data-filter="speed_bump">Speed Bumps</button>
+            <button class="filter-pill" data-filter="crack">Cracks</button>
+            <button class="filter-pill" data-filter="surface_depression">Depressions</button>
+          </div>
+
+          <!-- Scrollable Defect List -->
+          <div id="dock-defect-list" class="defect-scroll-list">
+            <div class="loading-state">Loading crowdsourced road hazards...</div>
+          </div>
+
+          <!-- Export Actions Bar -->
+          <div class="dock-export-bar">
+            <a href="/api/admin/export/csv" target="_blank" class="btn-export">
+              <i data-lucide="download" style="width: 12px; height: 12px;"></i>
+              Export BBMP CSV
+            </a>
+            <a href="/api/admin/export/geojson" target="_blank" class="btn-export">
+              <i data-lucide="map" style="width: 12px; height: 12px;"></i>
+              Export GeoJSON
+            </a>
+          </div>
+        </div>
+
+        <!-- TAB 2: ACTIVE FLEET RADAR -->
+        <div id="dock-tab-fleet" class="dock-tab-content">
+          <div class="fleet-radar-header">
+            <span style="font-size: 0.75rem; color: var(--foreground-muted);">Connected smartphone sensor rigs currently streaming edge road frames:</span>
+          </div>
+          <div id="dock-fleet-list" class="fleet-scroll-list">
+            <div class="loading-state">Scanning active fleet telemetry rigs...</div>
+          </div>
+        </div>
+
+        <!-- TAB 3: VERIFICATION AUDIT SUITE -->
+        <div id="dock-tab-audit" class="dock-tab-content">
+          <div class="audit-suite-card">
+            <h4 style="font-size: 0.85rem; font-weight: 600; color: #fff; margin-bottom: 6px;">
+              Automated Integrity & Verification Suite
+            </h4>
+            <p style="font-size: 0.75rem; color: var(--foreground-muted); line-height: 1.4; margin-bottom: 14px;">
+              Verifies the Review 2 Slide 13 Hard Rejection Gate mathematical formula, crowdsourced multi-pass statistical running averages, and ASTM D6433 Pavement Condition scoring.
+            </p>
+            <button id="btn-trigger-audit-tab" class="btn-launch" style="font-size: 0.8rem; padding: 10px;">
+              <i data-lucide="play-circle" style="width: 15px; height: 15px;"></i>
+              Run Verification Audit
             </button>
-            <button id="btn-pick-start" class="field-action-btn" title="Pick on Map">
-              <i data-lucide="map-pin" style="width: 14px; height: 14px;"></i>
-            </button>
           </div>
-          <div id="start-dropdown" class="autocomplete-menu"></div>
 
-          <!-- Destination Field -->
-          <div class="field-group">
-            <span class="field-glyph">
-              <i data-lucide="flag" style="width: 14px; height: 14px; color: var(--accent-cyan);"></i>
-            </span>
-            <input type="text" id="dest-input" class="field-input" placeholder="Destination: tap map or search" autocomplete="off">
-            <button id="btn-swap-route" class="field-action-btn" title="Reverse Route">
-              <i data-lucide="arrow-up-down" style="width: 14px; height: 14px;"></i>
-            </button>
-            <button id="btn-pick-dest" class="field-action-btn" title="Pick on Map">
-              <i data-lucide="map-pin" style="width: 14px; height: 14px;"></i>
-            </button>
-          </div>
-          <div id="dest-dropdown" class="autocomplete-menu"></div>
-        </div>
-
-        <!-- Presets -->
-        <div class="preset-strip">
-          <button class="chip-item" data-preset="bmsce">BMSCE</button>
-          <button class="chip-item" data-preset="silk-board">Silk Board</button>
-          <button class="chip-item" data-preset="koramangala">Koramangala</button>
-          <button class="chip-item" data-preset="ecity">Electronic City</button>
-          <button class="chip-item" data-preset="airport">KIA Airport</button>
-        </div>
-
-        <!-- Calculated Telemetry Summary -->
-        <div class="telemetry-row">
-          <span>Distance: <span id="route-dist-val" class="telemetry-val">-- km</span></span>
-          <span>ETA: <span id="route-time-val" class="telemetry-val">-- min</span></span>
-          <span>Engine: <span id="route-source-val" class="telemetry-val">OSRM</span></span>
-        </div>
-
-        <!-- Operational Mode Tabs -->
-        <div class="segmented-tabs">
-          <div id="mode-phone" class="tab-option">
-            <i data-lucide="smartphone" style="width: 14px; height: 14px;"></i>
-            Hardware Sensors
-          </div>
-          <div id="mode-sim" class="tab-option active">
-            <i data-lucide="cpu" style="width: 14px; height: 14px;"></i>
-            Drive Simulator
-          </div>
-        </div>
-
-        <!-- Simulation Speed Controls -->
-        <div id="sim-controls" class="slider-control-block" style="display: block;">
-          <div class="slider-header">
-            <span>Simulation Velocity</span>
-            <span id="sim-speed-val" class="telemetry-val">45 km/h</span>
-          </div>
-          <input type="range" id="sim-speed-slider" class="speed-slider" min="20" max="90" value="45" step="5">
-        </div>
-
-        <!-- Primary Launch Trigger -->
-        <button id="btn-start-trip" class="btn-launch">
-          <i data-lucide="play" style="width: 16px; height: 16px; fill: currentColor;"></i>
-          INITIALIZE ACQUISITION
-        </button>
-      </div>
-
-      <!-- Active Cockpit HUD -->
-      <div id="driver-hud" class="cockpit-hud">
-        <div class="hud-cluster">
-          <div class="speedometer-block">
-            <div class="speed-display">
-              <span id="hud-speed" class="speed-digit">0</span>
-              <span class="speed-unit">km/h</span>
+          <div id="audit-results-container" class="audit-results-box" style="display: none;">
+            <div class="audit-summary-badge" id="audit-summary-badge">
+              <i data-lucide="check-circle" style="width: 16px; height: 16px; color: var(--status-emerald);"></i>
+              <span id="audit-summary-text">ALL 3 SYSTEM VERIFICATIONS PASSED</span>
             </div>
-          </div>
-
-          <div class="hud-metrics-grid">
-            <div>
-              <div class="metric-cell-label">Vertical G</div>
-              <div id="hud-impact-g" class="metric-cell-val">1.00g</div>
-            </div>
-            <div>
-              <div class="metric-cell-label">Road Index</div>
-              <div id="hud-road-score" class="metric-cell-val quality-optimum">100</div>
-            </div>
-            <div>
-              <div class="metric-cell-label">Anomalies</div>
-              <div id="hud-anomaly-count" class="metric-cell-val" style="color: var(--status-rose);">0</div>
-            </div>
+            <div id="audit-checks-list" style="display: flex; flex-direction: column; gap: 8px; margin-top: 10px;"></div>
           </div>
         </div>
 
-        <!-- Waveform Oscilloscope -->
-        <div class="oscilloscope-stage">
-          <canvas id="vibrationCanvas"></canvas>
-          <span class="oscilloscope-meta">ACCEL Z-AXIS [10Hz]</span>
-        </div>
+      </aside>
 
-        <!-- Edge Sensor Telemetry Streamer Status -->
-        <div class="edge-streamer-strip">
-          <div style="display: flex; align-items: center; gap: 6px;">
-            <span class="edge-stream-dot"></span>
-            <span>EDGE SENSOR RIG</span>
-          </div>
-          <span id="edge-packet-count">0 pkts streamed</span>
-          <span style="color: var(--status-emerald); font-weight: 600;">SERVER ENGINE SYNC</span>
-        </div>
-
-        <!-- Handling Guard Notice -->
-        <div id="guard-banner" class="guard-notification">
-          <i data-lucide="shield-alert" style="width: 14px; height: 14px; flex-shrink: 0;"></i>
-          <span>Handling motion detected — surface anomaly suppressed</span>
-        </div>
-
-        <!-- HUD Controls -->
-        <div class="cockpit-controls">
-          <button id="btn-quick-report" class="btn-secondary-action">
-            <i data-lucide="alert-triangle" style="width: 14px; height: 14px; color: var(--status-rose);"></i>
-            Flag Defect
-          </button>
-          <button id="btn-stop-trip" class="btn-launch btn-terminate" style="margin-top: 0; flex: 1.2;">
-            <i data-lucide="square" style="width: 15px; height: 15px; fill: currentColor;"></i>
-            TERMINATE TRIP
-          </button>
-        </div>
-      </div>
-
-      <!-- Precision Dock (Right) -->
-      <div class="dock-controls">
-        <button id="ctrl-center-btn" class="dock-btn" title="Center on Vehicle">
+      <!-- Floating Map Utility Dock -->
+      <div class="map-floating-dock">
+        <button id="ctrl-center-btn" class="map-tool-btn" title="Center on Bengaluru">
           <i data-lucide="crosshair" style="width: 16px; height: 16px;"></i>
         </button>
-        <button id="ctrl-refresh-btn" class="dock-btn" title="Refresh Global State">
+        <button id="ctrl-refresh-btn" class="map-tool-btn" title="Refresh Live Anomalies">
           <i data-lucide="refresh-cw" style="width: 16px; height: 16px;"></i>
         </button>
-        <button id="ctrl-clear-btn" class="dock-btn" title="Reset Route">
-          <i data-lucide="rotate-ccw" style="width: 16px; height: 16px;"></i>
-        </button>
       </div>
 
-      <!-- Segmented Anomaly Filter Capsule -->
-      <div class="filter-dock">
-        <button class="filter-dock-pill active" data-filter="all">All Surface</button>
-        <button class="filter-dock-pill" data-filter="pothole">Potholes</button>
-        <button class="filter-dock-pill" data-filter="speed_bump">Speed Bumps</button>
-        <button class="filter-dock-pill" data-filter="crack">Cracks</button>
-        <button class="filter-dock-pill" data-filter="surface_depression">Depressions</button>
-      </div>
-
-      <!-- Anomaly Detail Drawer -->
-      <div id="anomaly-sheet" class="sheet-overlay">
-        <div class="sheet-handle-bar"></div>
-        <div class="sheet-title-group">
-          <div>
-            <div class="sheet-main-title">
-              <span id="sheet-type-icon">
-                <i data-lucide="alert-circle" style="width: 18px; height: 18px;"></i>
-              </span>
-              <span id="sheet-type-text">Pothole Surface Defect</span>
+      <!-- Anomaly Inspector Drawer (Slide 13 Formulation Breakdown) -->
+      <div id="anomaly-sheet" class="anomaly-sheet">
+        <div class="sheet-header">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <div id="sheet-type-icon" class="type-icon-box"></div>
+            <div>
+              <span id="sheet-type-text" class="sheet-title">POTHOLE DEFECT</span>
+              <span id="sheet-address" class="sheet-subtitle">12.97160, 77.59460</span>
             </div>
-            <p id="sheet-address" class="sheet-sub-address">Coordinates</p>
           </div>
           <button id="close-sheet-btn" class="btn-ghost-icon">
             <i data-lucide="x" style="width: 16px; height: 16px;"></i>
           </button>
         </div>
 
-        <div class="sheet-data-grid">
-          <div class="data-card-cell">
-            <div class="cell-caption">Avg Impact Force</div>
-            <div id="sheet-peak-g" class="cell-figure">1.82 g</div>
+        <!-- Slide 13 Mathematical Multi-Pass Metrics -->
+        <div class="sheet-metrics-grid">
+          <div class="sheet-metric-card">
+            <span class="sheet-metric-label">Avg Impact Force</span>
+            <span id="sheet-peak-g" class="sheet-metric-val">1.75 g</span>
           </div>
-          <div class="data-card-cell">
-            <div class="cell-caption">Avg Velocity</div>
-            <div id="sheet-speed" class="cell-figure">38 km/h</div>
+          <div class="sheet-metric-card">
+            <span class="sheet-metric-label">Avg Velocity</span>
+            <span id="sheet-speed" class="sheet-metric-val">42 km/h</span>
           </div>
-          <div class="data-card-cell">
-            <div class="cell-caption">Statistical Confidence</div>
-            <div id="sheet-conf" class="cell-figure">94%</div>
+          <div class="sheet-metric-card">
+            <span class="sheet-metric-label">Slide 13 Confidence</span>
+            <span id="sheet-conf" class="sheet-metric-val highlight">88%</span>
           </div>
-          <div class="data-card-cell">
-            <div class="cell-caption">Crowd Confirmations</div>
-            <div id="sheet-verified" class="cell-figure">14 units</div>
+          <div class="sheet-metric-card">
+            <span class="sheet-metric-label">Crowd Confirmations</span>
+            <span id="sheet-verified" class="sheet-metric-val emerald">3 passes</span>
           </div>
         </div>
 
-        <div class="sheet-button-strip">
-          <button id="btn-verify-anomaly" class="btn-launch" style="margin-top: 0; background: var(--status-emerald); color: #fff;">
-            <i data-lucide="check" style="width: 16px; height: 16px;"></i>
-            Verify Defect
+        <div class="slide13-formula-card">
+          <span style="font-size: 0.68rem; color: var(--accent-cyan); font-family: var(--font-mono); font-weight: 700;">
+            REVIEW 2 SLIDE 13 FORMULA: C = G × Σ (w_i · s_i)
+          </span>
+          <span style="font-size: 0.72rem; color: var(--foreground-muted); margin-top: 2px;">
+            Hard Gates G = 1 (Passed) • Phone Handling: Rejected • Multi-Pass Centroid Verified
+          </span>
+        </div>
+
+        <!-- Work Order Actions -->
+        <div class="sheet-actions-cluster">
+          <button id="btn-dispatch-bbmp" class="btn-launch" style="font-size: 0.8rem; padding: 10px 14px;">
+            <i data-lucide="file-plus" style="width: 14px; height: 14px;"></i>
+            Dispatch BBMP Work Order
           </button>
-          <button id="btn-file-complaint" class="btn-secondary-action" style="border-color: var(--status-amber); color: #fbbf24;">
-            <i data-lucide="file-plus" style="width: 15px; height: 15px;"></i>
-            File BBMP Ticket
+          <button id="btn-mark-verified" class="btn-ghost-action">
+            <i data-lucide="check" style="width: 14px; height: 14px; color: var(--status-emerald);"></i>
+            Mark Verified
           </button>
-          <button id="btn-resolve-anomaly" class="btn-secondary-action">
-            <i data-lucide="check-check" style="width: 16px; height: 16px;"></i>
-            Mark Repaired
+          <button id="btn-mark-resolved" class="btn-ghost-action">
+            <i data-lucide="check-check" style="width: 14px; height: 14px; color: var(--accent-cyan);"></i>
+            Mark Resolved
           </button>
         </div>
       </div>
+
     </div>
 
-    <!-- Trip Report Modal -->
-    <div id="report-modal" class="dialog-backdrop">
-      <div class="dialog-window">
-        <div class="dialog-header">
-          <h3 class="dialog-title">Mission Report</h3>
-          <button id="close-report-btn" class="btn-ghost-icon">
-            <i data-lucide="x" style="width: 16px; height: 16px;"></i>
-          </button>
-        </div>
-
-        <div class="score-hero-container">
-          <div id="report-score-val" class="score-hero-num">88</div>
-          <div class="score-hero-label">Road Quality Index [0-100]</div>
-        </div>
-
-        <div class="sheet-data-grid">
-          <div class="data-card-cell">
-            <div class="cell-caption">Distance</div>
-            <div id="report-dist-val" class="cell-figure">0.0 km</div>
-          </div>
-          <div class="data-card-cell">
-            <div class="cell-caption">Duration</div>
-            <div id="report-duration-val" class="cell-figure">0 min</div>
-          </div>
-          <div class="data-card-cell">
-            <div class="cell-caption">Anomalies Detected</div>
-            <div id="report-anomaly-val" class="cell-figure">0</div>
-          </div>
-          <div class="data-card-cell">
-            <div class="cell-caption">State</div>
-            <div class="cell-figure" style="color: var(--status-emerald);">Universal Synced</div>
-          </div>
-        </div>
-
-        <div style="margin-top: 16px;">
-          <div class="cell-caption">Incident Telemetry Summary</div>
-          <div id="report-summary-text" class="log-box">Report log...</div>
-        </div>
-
-        <div id="ai-narrative-section" style="margin-top: 14px; display: none;">
-          <div class="cell-caption" style="color: var(--accent-cyan); display: flex; align-items: center; gap: 4px;">
-            <i data-lucide="sparkles" style="width: 12px; height: 12px;"></i>
-            Gemini AI Incident Analysis
-          </div>
-          <div id="report-ai-text" class="log-box" style="border-left: 2px solid var(--accent-cyan);"></div>
-        </div>
-
-        <div class="sheet-button-strip">
-          <button id="btn-download-json" class="btn-secondary-action">
-            <i data-lucide="download" style="width: 14px; height: 14px;"></i>
-            Export JSON
-          </button>
-          <button id="btn-close-modal" class="btn-launch" style="margin-top: 0; flex: 1.2;">Done</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- QR Code Pair Modal -->
-    <div id="qr-modal" class="dialog-backdrop">
-      <div class="dialog-window" style="text-align: center;">
-        <div class="dialog-header">
-          <h3 class="dialog-title">Smartphone Pairing</h3>
-          <button id="close-qr-btn" class="btn-ghost-icon">
-            <i data-lucide="x" style="width: 16px; height: 16px;"></i>
-          </button>
-        </div>
-
-        <p style="color: var(--foreground-muted); font-size: 0.85rem; line-height: 1.5; margin-bottom: 16px;">
-          Scan with your smartphone camera to connect live hardware sensors over Wi-Fi.
-        </p>
-
-        <div style="display: flex; justify-content: center; margin: 12px 0;">
-          <img id="qr-img" style="width: 200px; height: 200px; border-radius: 12px; padding: 6px; background: #fff;" alt="Pairing QR">
-        </div>
-
-        <div style="display: flex; gap: 8px; margin-top: 14px;">
-          <input type="text" id="mobile-url-input" class="field-input" readonly style="background: var(--background); border: 1px solid var(--border); border-radius: 6px; font-family: var(--font-mono); font-size: 0.8rem;">
-          <button id="btn-copy-url" class="btn-secondary-action" style="flex: none;">Copy</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Municipal Civic Complaints / Work Orders Modal -->
+    <!-- MUNICIPAL CIVIC WORK ORDERS MODAL -->
     <div id="complaints-modal" class="dialog-backdrop">
-      <div class="dialog-window complaints-window">
+      <div class="dialog-window" style="max-width: 720px;">
         <div class="dialog-header">
           <div style="display: flex; align-items: center; gap: 8px;">
-            <i data-lucide="file-check-2" style="width: 18px; height: 18px; color: var(--accent-cyan);"></i>
-            <h3 class="dialog-title">Municipal Civic Work Orders</h3>
+            <i data-lucide="clipboard-list" style="width: 18px; height: 18px; color: var(--accent-cyan);"></i>
+            <h3 class="dialog-title">Municipal Civic Work Orders (BBMP)</h3>
           </div>
           <button id="close-complaints-btn" class="btn-ghost-icon">
             <i data-lucide="x" style="width: 16px; height: 16px;"></i>
@@ -387,7 +348,7 @@
 
         <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 10px; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
           <p style="color: var(--foreground-muted); font-size: 0.8rem;">
-            Central server-dispatched civic public works tickets (BBMP & Municipal Infrastructure)
+            Central server-dispatched civic public works tickets for municipal contractor repair.
           </p>
           <div class="filter-dock" style="position: static; transform: none; padding: 2px;">
             <button class="filter-dock-pill active" data-complaint-filter="all">All</button>
@@ -403,41 +364,9 @@
       </div>
     </div>
 
-    <!-- PC Civic Command Center Auth Modal -->
-    <div id="pc-auth-modal" class="dialog-backdrop">
-      <div class="dialog-window" style="max-width: 420px;">
-        <div class="dialog-header">
-          <div style="display: flex; align-items: center; gap: 8px;">
-            <i data-lucide="shield-check" style="width: 18px; height: 18px; color: var(--accent-cyan);"></i>
-            <h3 class="dialog-title">Civic Command Authentication</h3>
-          </div>
-          <button id="close-pc-auth-btn" class="btn-ghost-icon">
-            <i data-lucide="x" style="width: 16px; height: 16px;"></i>
-          </button>
-        </div>
-
-        <p style="color: var(--foreground-muted); font-size: 0.82rem; margin: 10px 0 16px;">
-          Sign in as a verified municipal road officer or infrastructure supervisor.
-        </p>
-
-        <form id="pc-auth-form" style="display: flex; flex-direction: column; gap: 12px;">
-          <div>
-            <label style="font-size: 0.75rem; color: var(--foreground-muted); font-weight: 600;">Officer Username / Email</label>
-            <input type="text" id="pc-auth-user" class="field-input" placeholder="admin or officer email" style="width: 100%; margin-top: 4px;" required autocomplete="username">
-          </div>
-          <div>
-            <label style="font-size: 0.75rem; color: var(--foreground-muted); font-weight: 600;">Password</label>
-            <input type="password" id="pc-auth-pass" class="field-input" placeholder="••••••••" style="width: 100%; margin-top: 4px;" required autocomplete="current-password">
-          </div>
-          <div id="pc-auth-err" style="color: var(--status-rose); font-size: 0.75rem; display: none;"></div>
-          <button type="submit" class="btn-launch" style="margin-top: 6px;">Sign In to Command Center</button>
-        </form>
-      </div>
-    </div>
   </div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
-  <script src="/static/audio-keepalive.js"></script>
   <script src="/static/app.js"></script>
 </body>
 </html>

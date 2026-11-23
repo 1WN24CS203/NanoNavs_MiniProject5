@@ -1134,21 +1134,391 @@ html, body {
   font-family: var(--font-mono);
 }
 
-/* Responsive */
-@media (max-width: 600px) {
-  .route-drawer-card {
-    top: 10px;
-    left: 10px;
-    width: calc(100% - 20px);
-    padding: 14px;
-  }
-  .cockpit-hud {
-    bottom: 12px;
-    left: 10px;
-    width: calc(100% - 20px);
-    padding: 14px;
-  }
-  .filter-dock {
-    bottom: 14px;
-  }
+/* ── Fullscreen Civic Officer Authentication Gate ───────────────────────── */
+.auth-gate-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: radial-gradient(circle at 50% 20%, #18181b 0%, #09090b 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
 }
+
+.auth-gate-card {
+  width: 100%;
+  max-width: 440px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 28px;
+  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(255, 255, 255, 0.05);
+}
+
+.auth-brand-badge {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.btn-ghost-action {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--foreground-muted);
+  font-size: 0.76rem;
+  padding: 7px 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: all 0.15s ease;
+}
+
+.btn-ghost-action:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--foreground);
+  border-color: var(--border-focus);
+}
+
+.officer-profile-pill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 4px 10px;
+}
+
+.icon-btn-sm {
+  background: transparent;
+  border: none;
+  color: var(--foreground-dim);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  border-radius: 4px;
+}
+
+.icon-btn-sm:hover {
+  color: var(--status-rose);
+}
+
+/* ── Civic Data Management Dock (Left Workstation Panel) ─────────────────── */
+.civic-data-dock {
+  position: absolute;
+  top: 64px;
+  left: 18px;
+  bottom: 18px;
+  width: 420px;
+  z-index: 800;
+  background: rgba(14, 14, 17, 0.95);
+  backdrop-filter: blur(16px);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 20px 45px rgba(0, 0, 0, 0.7);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.civic-data-dock.collapsed {
+  transform: translateX(-370px);
+}
+
+.dock-header {
+  padding: 16px 18px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--card);
+}
+
+.dock-title {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--accent-cyan);
+  letter-spacing: 0.5px;
+}
+
+.dock-sub {
+  font-size: 0.72rem;
+  color: var(--foreground-muted);
+  margin-top: 2px;
+}
+
+.municipal-kpi-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.kpi-card {
+  background: rgba(24, 24, 27, 0.6);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+}
+
+.kpi-label {
+  font-size: 0.66rem;
+  color: var(--foreground-dim);
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+}
+
+.kpi-val {
+  font-family: var(--font-mono);
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: var(--foreground);
+  margin-top: 2px;
+}
+
+.kpi-val.highlight { color: var(--accent-cyan); }
+.kpi-val.emerald { color: var(--status-emerald); }
+.kpi-val.rose { color: var(--status-rose); }
+
+.dock-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border-subtle);
+  background: rgba(9, 9, 11, 0.6);
+}
+
+.dock-tab-btn {
+  flex: 1;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 10px 6px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--foreground-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: all 0.15s ease;
+}
+
+.dock-tab-btn.active {
+  color: var(--foreground);
+  border-bottom-color: var(--accent-cyan);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.dock-tab-content {
+  display: none;
+  flex: 1;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.dock-tab-content.active {
+  display: flex;
+}
+
+.dock-search-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: rgba(18, 18, 21, 0.5);
+}
+
+.dock-search-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: var(--foreground);
+  font-size: 0.78rem;
+  outline: none;
+}
+
+.filter-pill-row {
+  display: flex;
+  gap: 6px;
+  padding: 8px 14px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.filter-pill {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 9999px;
+  padding: 3px 9px;
+  font-size: 0.68rem;
+  color: var(--foreground-muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.filter-pill.active {
+  background: var(--foreground);
+  color: var(--background);
+  font-weight: 600;
+  border-color: var(--foreground);
+}
+
+.defect-scroll-list, .fleet-scroll-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.dock-defect-item {
+  background: var(--card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.dock-defect-item:hover, .dock-defect-item.selected {
+  border-color: var(--accent-cyan);
+  background: var(--card-elevated);
+}
+
+.dock-defect-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.severity-badge {
+  font-size: 0.62rem;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  text-transform: uppercase;
+}
+
+.severity-badge.critical { background: rgba(244, 63, 94, 0.2); color: #fb7185; }
+.severity-badge.high { background: rgba(245, 158, 11, 0.2); color: #fbbf24; }
+.severity-badge.moderate { background: rgba(59, 130, 246, 0.2); color: #60a5fa; }
+.severity-badge.low { background: rgba(16, 185, 129, 0.2); color: #34d399; }
+
+.dock-defect-type {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--foreground);
+  margin-left: 6px;
+}
+
+.dock-passes-badge {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 0.64rem;
+  background: rgba(16, 185, 129, 0.1);
+  color: var(--status-emerald);
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.dock-defect-addr {
+  font-size: 0.72rem;
+  color: var(--foreground-muted);
+  margin-top: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dock-defect-meta {
+  display: flex;
+  gap: 12px;
+  margin-top: 6px;
+  font-size: 0.68rem;
+  font-family: var(--font-mono);
+  color: var(--foreground-dim);
+}
+
+.dock-export-bar {
+  padding: 10px 14px;
+  border-top: 1px solid var(--border-subtle);
+  background: var(--card);
+  display: flex;
+  gap: 8px;
+}
+
+.btn-export {
+  flex: 1;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--foreground);
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 6px;
+  text-align: center;
+  text-decoration: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.btn-export:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: var(--accent-cyan);
+}
+
+.dock-fleet-item {
+  background: var(--card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+}
+
+.slide13-formula-card {
+  background: rgba(6, 182, 212, 0.06);
+  border: 1px dashed rgba(6, 182, 212, 0.35);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  margin-top: 10px;
+}
+
+.audit-suite-card {
+  padding: 16px;
+  background: var(--card);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.audit-results-box {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px;
+}
+
+.audit-summary-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  color: var(--status-emerald);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+

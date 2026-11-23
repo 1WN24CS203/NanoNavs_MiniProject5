@@ -877,3 +877,58 @@ class TestStatisticalAveragingAndSeparateUI:
         assert drivers_resp.status_code == 200
         assert "drivers" in drivers_resp.json()
 
+
+class TestSlide13ConfidenceFormulaAndCalibratedRating:
+    """Tests the exact Review 2 Slide 13 math formulation and calibrated road pointing score."""
+
+    def test_hard_rejection_gates(self):
+        detector = AnomalyDetector(enable_handling_guard=True, min_speed_kmh=10.0)
+        
+        # 1. Gate: vehicle speed < min_speed_kmh (stationary or walking)
+        stationary_frame = SensorFrame(
+            frame_id="f_stat",
+            timestamp=100.0,
+            gps=GPSCoordinate(latitude=12.97, longitude=77.59),
+            accelerometer=AccelerometerReading(x=0.0, y=0.0, z=1.8, timestamp=100.0),
+            vehicle_speed_kmh=4.0  # Fails min_speed_kmh (10 km/h)
+        )
+        detector.process_frame(stationary_frame)
+        detector.process_frame(stationary_frame)
+        res = detector.process_frame(stationary_frame)
+        assert res is None  # Hard rejection gate G = 0
+
+        # 2. Gate: Phone handling angular speed >= 2.5 rad/s
+        detector.reset()
+        from models import GyroscopeReading
+        handling_frame = SensorFrame(
+            frame_id="f_hand",
+            timestamp=101.0,
+            gps=GPSCoordinate(latitude=12.97, longitude=77.59),
+            accelerometer=AccelerometerReading(x=0.0, y=0.0, z=1.9, timestamp=101.0),
+            gyroscope=GyroscopeReading(x=1.8, y=1.8, z=0.5, timestamp=101.0), # angular_speed > 2.5 rad/s
+            vehicle_speed_kmh=40.0
+        )
+        detector.process_frame(handling_frame)
+        detector.process_frame(handling_frame)
+        res2 = detector.process_frame(handling_frame)
+        assert res2 is None  # G = 0, discarded
+
+    def test_calibrated_road_score_never_collapses_on_typical_drives(self):
+        """Verify rating does not unnaturally collapse below 10 for normal city roads."""
+        gen = ReportGenerator()
+        
+        # Typical Bangalore road trip: 3 moderate bumps and 1 pothole over 6.5 km
+        anomalies = [
+            DetectedAnomaly(anomaly_type=AnomalyType.SPEED_BUMP, severity=SeverityLevel.MODERATE, confidence=0.75),
+            DetectedAnomaly(anomaly_type=AnomalyType.SPEED_BUMP, severity=SeverityLevel.MODERATE, confidence=0.80),
+            DetectedAnomaly(anomaly_type=AnomalyType.CRACK, severity=SeverityLevel.LOW, confidence=0.70),
+            DetectedAnomaly(anomaly_type=AnomalyType.POTHOLE, severity=SeverityLevel.HIGH, confidence=0.82),
+        ]
+        report = gen.generate(anomalies, total_distance_km=6.5, total_frames=650)
+        
+        # Pavement condition index for this typical route should be realistic (60 to 85)
+        # and MUST NOT drop below 10 or 30!
+        assert report.road_quality_score >= 60.0
+        assert report.road_quality_score <= 85.0
+
+

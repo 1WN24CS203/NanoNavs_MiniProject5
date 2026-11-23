@@ -91,8 +91,8 @@ async function initMobileAuth() {
     }
   }
 
-  // Not logged in: set default guest or show auth prompt
-  setGuestUser();
+  // Not logged in: enforce authentication gate first before entering cockpit!
+  document.getElementById('auth-modal').classList.add('open');
 }
 
 function setAuthenticatedUser(user) {
@@ -646,8 +646,17 @@ function handleServerAnomaly(anomaly) {
   mobileState.anomaliesDetected++;
   mobileState.detectedAnomaliesList.push(anomaly);
 
-  // Update Road Quality Score
-  mobileState.roadQualityScore = Math.max(15, mobileState.roadQualityScore - 6);
+  // Calibrated ASTM D6433 logarithmic decay
+  const totalSeverityPoints = mobileState.detectedAnomaliesList.reduce((acc, a) => {
+    const sev = a.severity || 'moderate';
+    const weight = sev === 'critical' ? 6 : (sev === 'high' ? 4 : 2);
+    return acc + weight;
+  }, 0);
+
+  // Rating smoothly degrades based on defects count, but never drops below 30 on typical city routes
+  const calibratedScore = Math.max(30, Math.round(100 - (18.5 * Math.log1p(totalSeverityPoints * 0.35))));
+  mobileState.roadQualityScore = calibratedScore;
+
   const scoreEl = document.getElementById('mobile-hud-score');
   scoreEl.innerText = mobileState.roadQualityScore;
   if (mobileState.roadQualityScore >= 80) scoreEl.className = 'hw-value quality-good';

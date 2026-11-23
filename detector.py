@@ -8,6 +8,7 @@ This module uses threshold-based detection with sliding-window analysis.
 No machine-learning model or external API is required at this layer.
 """
 
+import math
 import statistics
 from typing import List, Optional
 
@@ -123,16 +124,37 @@ class AnomalyDetector:
         self._cooldown_frames = 0
 
     def _analyse_window(self, current_frame: SensorFrame) -> Optional[DetectedAnomaly]:
-        """Run multi-sensor analysis on the current sliding window."""
-        # ── Vehicle Motion Assessment (Review 2 Slide 10) ───────────────────
+        """
+        Run multi-sensor analysis on the current sliding window using the exact
+        Review 2 Slide 13 Confidence Scoring & Hard Rejection Gates formulation:
+
+        C = G × (w_acc·s_acc + w_gyro·s_gyro + w_ctx·s_ctx + w_sens·s_sens + w_gps·s_gps + w_agree·s_agree)
+        where G = 1 only if every hard gate passes, otherwise 0.
+        """
+        # ── Hard Rejection Gates (Review 2 Slide 13: G = 1 or 0) ─────────────
+        # Gate 1: Saturated or NaN readings
+        if (
+            current_frame.timestamp <= 0
+            or math.isnan(current_frame.accelerometer.z)
+            or abs(current_frame.accelerometer.z) > 10.0
+        ):
+            return None
+
+        # Gate 2: Vehicle Motion Assessment (Review 2 Slide 10)
         if current_frame.vehicle_speed_kmh < self.min_speed_kmh:
             return None
 
-        # ── Phone-Handling Guard (Review 2 Slide 11) ────────────────────────
+        # Gate 3: Phone-Handling Guard (Review 2 Slide 11)
         if self.enable_handling_guard and current_frame.gyroscope:
             if current_frame.gyroscope.angular_speed >= THRESHOLD_PHONE_HANDLING_OMEGA:
                 # Discard sudden orientation or rotation spikes from user handling
                 return None
+
+        # Gate 4: GPS Quality (hdop must not exceed hard limit)
+        if current_frame.gps and current_frame.gps.hdop > 15.0:
+            return None
+
+        G = 1.0  # All hard gates passed
 
         accel = current_frame.accelerometer
         v_mag = accel.vertical_magnitude
@@ -140,7 +162,6 @@ class AnomalyDetector:
         # Compute window statistics for baseline comparison
         window_z_values = [f.accelerometer.z for f in self._window]
         baseline_std = statistics.stdev(window_z_values) if len(window_z_values) > 1 else 0.0
-        z_deviation = abs(accel.z - statistics.mean(window_z_values))
 
         # Speed-adjusted sensitivity
         speed_factor = 1.0
@@ -149,34 +170,91 @@ class AnomalyDetector:
 
         adjusted_v_mag = v_mag * speed_factor
 
-        # ── Primary classification via accelerometer ──────────────────────
+        # ── Primary classification candidate via accelerometer ───────────────
         anomaly_type = AnomalyType.UNKNOWN
-        base_confidence = 0.0
 
         if adjusted_v_mag >= THRESHOLD_POTHOLE_G:
             anomaly_type = AnomalyType.POTHOLE
-            base_confidence = min(0.6 + (adjusted_v_mag - THRESHOLD_POTHOLE_G) * 1.5, 0.95)
         elif adjusted_v_mag >= THRESHOLD_SPEED_BUMP_G:
-            # Distinguish speed bumps from depressions by Z-axis profile
             if self._is_symmetric_bump():
                 anomaly_type = AnomalyType.SPEED_BUMP
             else:
                 anomaly_type = AnomalyType.SURFACE_DEPRESSION
-            base_confidence = min(0.5 + (adjusted_v_mag - THRESHOLD_SPEED_BUMP_G) * 2.0, 0.90)
         elif adjusted_v_mag >= THRESHOLD_CRACK_G:
             anomaly_type = AnomalyType.CRACK
-            base_confidence = min(0.4 + (adjusted_v_mag - THRESHOLD_CRACK_G) * 1.8, 0.80)
         else:
             return None  # Below noise floor
 
-        # ── Acoustic fusion (when available) ──────────────────────────────
+        # ── Evidence Factor Calculation (Review 2 Slide 13: each s ∈ [0, 1]) ──
+        # 1. s_acc: Acceleration evidence (peak, energy against baseline)
+        if anomaly_type == AnomalyType.POTHOLE:
+            s_acc = min(1.0, 0.65 + (adjusted_v_mag - THRESHOLD_POTHOLE_G) * 1.2)
+        elif anomaly_type in (AnomalyType.SPEED_BUMP, AnomalyType.SURFACE_DEPRESSION):
+            s_acc = min(0.92, 0.55 + (adjusted_v_mag - THRESHOLD_SPEED_BUMP_G) * 1.5)
+        else:
+            s_acc = min(0.85, 0.45 + (adjusted_v_mag - THRESHOLD_CRACK_G) * 1.5)
+
+        # 2. s_gyro: Rotation consistent with road surface profile
+        s_gyro = 0.65
+        if current_frame.gyroscope:
+            omega = current_frame.gyroscope.angular_speed
+            if 0.05 <= omega <= 1.8:
+                s_gyro = 0.88  # Road surface pitch/roll
+            elif omega < 0.05:
+                s_gyro = 0.55  # Mild vibration
+            else:
+                s_gyro = 0.30  # High rotation approaching handling
+
+        # 3. s_ctx: Sustained vehicle-motion context
+        if current_frame.vehicle_speed_kmh > 0:
+            s_ctx = min(1.0, max(0.4, current_frame.vehicle_speed_kmh / 45.0))
+        else:
+            s_ctx = 0.55
+
+        # 4. s_sens: Sensor quality, continuity, absence of clipping
+        s_sens = 0.90 if baseline_std < 0.5 else 0.72
+
+        # 5. s_gps: GPS accuracy quality
+        if current_frame.gps:
+            s_gps = min(1.0, max(0.4, 1.0 / max(0.6, current_frame.gps.hdop)))
+        else:
+            s_gps = 0.5
+
+        # 6. s_agree: Acoustic agreement or spatial corroboration
         acoustic_boost = 0.0
         if self.enable_acoustic and current_frame.acoustic:
             acoustic_boost = self._acoustic_classification(
                 current_frame.acoustic, anomaly_type
             )
+        s_agree = min(1.0, 0.50 + acoustic_boost * 2.5)
 
-        final_confidence = min(base_confidence + acoustic_boost, 0.99)
+        # ── Slide 13 Proposed Weights: Σ w = 1.0 ─────────────────────────────
+        W_ACC = 0.35
+        W_GYRO = 0.15
+        W_CTX = 0.15
+        W_SENS = 0.10
+        W_GPS = 0.10
+        W_AGREE = 0.15
+
+        # Slide 13 Formula: C = G × Σ (w_i · s_i)
+        confidence = G * (
+            W_ACC * s_acc
+            + W_GYRO * s_gyro
+            + W_CTX * s_ctx
+            + W_SENS * s_sens
+            + W_GPS * s_gps
+            + W_AGREE * s_agree
+        )
+        final_confidence = min(round(confidence, 3), 0.99)
+
+        # ── Lifecycle Status (Review 2 Slide 13 & 15) ────────────────────────
+        # C < 0.45: Uncertain, 0.45 <= C < 0.70: Provisional, C >= 0.70: Corroborated
+        if final_confidence >= 0.70:
+            lifecycle_status = "corroborated"
+        elif final_confidence >= 0.45:
+            lifecycle_status = "provisional"
+        else:
+            lifecycle_status = "uncertain"
 
         # ── Severity classification ───────────────────────────────────────
         severity = self._classify_severity(anomaly_type, adjusted_v_mag, final_confidence)
@@ -195,6 +273,7 @@ class AnomalyDetector:
             vehicle_speed_kmh=current_frame.vehicle_speed_kmh,
             evidence_frames=[f.frame_id for f in self._window],
             description=self._generate_description(anomaly_type, severity, adjusted_v_mag),
+            status=lifecycle_status,
         )
 
         return detection

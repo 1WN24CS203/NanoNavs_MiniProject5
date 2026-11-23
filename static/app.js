@@ -18,7 +18,7 @@ const state = {
   clientId: 'client_' + Math.random().toString(36).substring(2, 9),
   tripActive: false,
   tripId: null,
-  mode: 'phone', // 'phone' or 'sim'
+  mode: 'sim', // 'phone' or 'sim' - default to simulation on desktop PC
   simSpeedKmh: 45,
   startCoord: null, // [lat, lon]
   endCoord: null,   // [lat, lon]
@@ -83,6 +83,16 @@ document.addEventListener('DOMContentLoaded', () => {
   fetchServerConfig();
   registerServiceWorker();
   if (window.lucide) window.lucide.createIcons();
+
+  // Pre-load default mission path (BMSCE -> Silk Board)
+  setTimeout(() => {
+    const pStart = state.presets['bmsce'];
+    const pEnd = state.presets['silk-board'];
+    if (pStart && pEnd) {
+      setStartLocation(pStart.coords[0], pStart.coords[1], pStart.name);
+      setDestination(pEnd.coords[0], pEnd.coords[1], pEnd.name);
+    }
+  }, 350);
 });
 
 // ── Leaflet Universal Map Setup ──────────────────────────────────────────────
@@ -1146,7 +1156,6 @@ function drawOscilloscope() {
   }
   ctx.stroke();
   ctx.shadowBlur = 0; // Reset
-}
 }
 
 // ── Sound Synthesizer for Detection Alerts ───────────────────────────────────

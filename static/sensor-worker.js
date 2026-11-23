@@ -32,7 +32,38 @@ self.onmessage = function (e) {
   }
 };
 
-function processSensorFrame(frame) {
+function normalizeFrame(raw) {
+  const accel = raw.accelerometer || {
+    x: raw.accel_x || 0,
+    y: raw.accel_y || 0,
+    z: raw.accel_z !== undefined ? raw.accel_z : 1.0
+  };
+  const gyro = raw.gyroscope || {
+    x: raw.gyro_x || 0,
+    y: raw.gyro_y || 0,
+    z: raw.gyro_z || 0
+  };
+  const lat = raw.latitude !== undefined ? raw.latitude : (raw.gps ? raw.gps.latitude : 12.9716);
+  const lon = raw.longitude !== undefined ? raw.longitude : (raw.gps ? raw.gps.longitude : 77.5946);
+  const alt = raw.altitude_m !== undefined ? raw.altitude_m : (raw.gps ? raw.gps.altitude_m : 920);
+  const db = raw.decibel_level !== undefined ? raw.decibel_level : (raw.acoustic ? raw.acoustic.decibel_level : 0);
+  const speed = raw.speed_kmh !== undefined ? raw.speed_kmh : 0;
+  const ts = raw.timestamp || Date.now() / 1000;
+
+  return {
+    accelerometer: accel,
+    gyroscope: gyro,
+    latitude: lat,
+    longitude: lon,
+    altitude_m: alt,
+    decibel_level: db,
+    speed_kmh: speed,
+    timestamp: ts
+  };
+}
+
+function processSensorFrame(rawFrame) {
+  const frame = normalizeFrame(rawFrame);
   windowBuffer.push(frame);
   if (windowBuffer.length > windowSize) {
     windowBuffer.shift();
@@ -100,11 +131,11 @@ function processSensorFrame(frame) {
       anomaly_type: anomalyType,
       severity: severity,
       confidence: Math.round(baseConfidence * 100) / 100,
-      latitude: frame.gps.latitude,
-      longitude: frame.gps.longitude,
-      altitude_m: frame.gps.altitude_m || 0,
+      latitude: frame.latitude,
+      longitude: frame.longitude,
+      altitude_m: frame.altitude_m,
       peak_vertical_g: Math.round(adjustedVMag * 1000) / 1000,
-      peak_acoustic_db: frame.acoustic ? frame.acoustic.decibel_level : 0,
+      peak_acoustic_db: frame.decibel_level,
       vehicle_speed_kmh: Math.round(frame.speed_kmh || 0),
       timestamp: frame.timestamp,
       description: `[${severity.toUpperCase()}] ${anomalyType.replace('_', ' ')} detected (${adjustedVMag.toFixed(2)}g)`

@@ -17,6 +17,7 @@ Run:
 import json
 import os
 import sys
+import time
 
 import pytest
 
@@ -712,3 +713,167 @@ class TestUniversalApiEndpoints:
         end_data = end_resp.json()
         assert end_data["status"] == "completed"
         assert "road_quality_score" in end_data["report"]
+        assert "points_earned" in end_data
+
+
+class TestAuthenticationAndSecurity:
+    """Tests signup, login, session token verification, and intruder guards."""
+
+    @classmethod
+    def setup_class(cls):
+        from starlette.testclient import TestClient
+        from server import app
+        cls.client = TestClient(app)
+
+    def test_signup_login_lifecycle(self):
+        unique_user = f"pilot_{os.getpid()}_{int(time.time())}"
+        # 1. Signup
+        signup_resp = self.client.post("/api/auth/signup", json={
+            "username": unique_user,
+            "email": f"{unique_user}@nanonavs.org",
+            "password": "secure_password_99",
+            "full_name": "Test Pilot Driver",
+            "role": "driver"
+        })
+        assert signup_resp.status_code == 200
+        signup_data = signup_resp.json()
+        assert "token" in signup_data
+        assert signup_data["user"]["points_balance"] == 100 # Welcome bonus
+        token = signup_data["token"]
+
+        # 2. Check /api/auth/me with Bearer token
+        me_resp = self.client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
+        assert me_resp.status_code == 200
+        assert me_resp.json()["user"]["username"] == unique_user
+
+        # 3. Login with credentials
+        login_resp = self.client.post("/api/auth/login", json={
+            "username_or_email": unique_user,
+            "password": "secure_password_99"
+        })
+        assert login_resp.status_code == 200
+        assert "token" in login_resp.json()
+
+        # 4. Reject invalid password
+        bad_login = self.client.post("/api/auth/login", json={
+            "username_or_email": unique_user,
+            "password": "wrong_password_here"
+        })
+        assert bad_login.status_code == 401
+
+        # 5. Reject unauthenticated access to /api/auth/me
+        unauth_resp = self.client.get("/api/auth/me")
+        assert unauth_resp.status_code == 401
+
+
+class TestRewardsAndCouponsMarketplace:
+    """Tests NanoPoints rewards, coupon catalog, redemption, and wallet vouchers."""
+
+    @classmethod
+    def setup_class(cls):
+        from starlette.testclient import TestClient
+        from server import app
+        cls.client = TestClient(app)
+
+    def test_coupon_catalog_and_redemption(self):
+        # 1. List available marketplace coupons
+        cat_resp = self.client.get("/api/rewards/coupons")
+        assert cat_resp.status_code == 200
+        coupons = cat_resp.json()["coupons"]
+        assert len(coupons) >= 5
+
+        # 2. Create rich driver with points
+        driver_id = f"shopper_{os.getpid()}_{int(time.time())}"
+        signup_resp = self.client.post("/api/auth/signup", json={
+            "username": driver_id,
+            "email": f"{driver_id}@fuel.org",
+            "password": "shopper_pass",
+            "full_name": "Loyal Road Contributor",
+        })
+        token = signup_resp.json()["token"]
+        user_id = signup_resp.json()["user"]["user_id"]
+
+        # Award additional points for testing
+        import database
+        database.award_user_points(user_id, 300, "Trip Contribution")
+
+        # 3. Redeem coupon
+        target_coupon = coupons[0] # Affordable coupon
+        redeem_resp = self.client.post(
+            "/api/rewards/redeem",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"coupon_id": target_coupon["coupon_id"]}
+        )
+        assert redeem_resp.status_code == 200
+        red_data = redeem_resp.json()
+        assert red_data["status"] == "success"
+        assert "promo_code" in red_data["redemption"]
+        assert red_data["redemption"]["promo_code"].startswith("NANONAV-")
+
+        # 4. View active vouchers in wallet
+        wallet_resp = self.client.get("/api/rewards/my-coupons", headers={"Authorization": f"Bearer {token}"})
+        assert wallet_resp.status_code == 200
+        my_vouchers = wallet_resp.json()["coupons"]
+        assert len(my_vouchers) >= 1
+        assert my_vouchers[0]["promo_code"] == red_data["redemption"]["promo_code"]
+
+
+class TestStatisticalAveragingAndSeparateUI:
+    """Tests multi-pass anomaly statistical running averages and mobile UI routing."""
+
+    @classmethod
+    def setup_class(cls):
+        from starlette.testclient import TestClient
+        from server import app
+        cls.client = TestClient(app)
+
+    def test_multi_pass_statistical_averages(self):
+        import database
+        # Use dynamic coordinate to ensure isolation from persistent DB records
+        base_lat = 19.1000 + (time.time() % 500) * 0.002
+        base_lon = 78.1000 + (time.time() % 500) * 0.002
+        # Hit 1
+        anom1 = DetectedAnomaly(
+            anomaly_type=AnomalyType.POTHOLE,
+            severity=SeverityLevel.HIGH,
+            confidence=0.80,
+            location=GPSCoordinate(latitude=base_lat, longitude=base_lon),
+            peak_vertical_g=1.60,
+            vehicle_speed_kmh=40.0,
+            peak_acoustic_db=80.0,
+            description="First pass pothole hit"
+        )
+        rec1, is_new1 = database.insert_or_update_anomaly(anom1)
+        assert is_new1 is True
+        assert rec1["peak_vertical_g"] == 1.60
+
+        # Hit 2 (within ~7m)
+        anom2 = DetectedAnomaly(
+            anomaly_type=AnomalyType.POTHOLE,
+            severity=SeverityLevel.HIGH,
+            confidence=0.85,
+            location=GPSCoordinate(latitude=base_lat + 0.00005, longitude=base_lon + 0.00005),
+            peak_vertical_g=2.00,
+            vehicle_speed_kmh=50.0,
+            peak_acoustic_db=90.0,
+            description="Second pass hit"
+        )
+        rec2, is_new2 = database.insert_or_update_anomaly(anom2)
+        assert is_new2 is False
+        assert rec2["verified_count"] == 2
+        # Average: (1.60 + 2.00) / 2 = 1.80
+        assert round(rec2["peak_vertical_g"], 2) == 1.80
+        # Average speed: (40.0 + 50.0) / 2 = 45.0
+        assert round(rec2["vehicle_speed_kmh"], 1) == 45.0
+
+    def test_mobile_ui_and_drivers_endpoint(self):
+        # 1. Dedicated Mobile App Route
+        mob_resp = self.client.get("/mobile")
+        assert mob_resp.status_code == 200
+        assert "NanoNavs Driver" in mob_resp.text
+
+        # 2. Active fleet drivers endpoint
+        drivers_resp = self.client.get("/api/drivers")
+        assert drivers_resp.status_code == 200
+        assert "drivers" in drivers_resp.json()
+

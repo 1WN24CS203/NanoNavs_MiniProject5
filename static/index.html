@@ -27,11 +27,16 @@
         </div>
         <div class="brand-text">
           <span>NanoNavs</span>
-          <span class="brand-badge">2.0</span>
+          <span class="brand-badge">CIVIC COMMAND</span>
         </div>
       </div>
 
       <div class="nav-cluster">
+        <a href="/mobile" id="btn-open-mobile-app" class="status-pill" style="text-decoration: none; color: var(--foreground); cursor: pointer; border-color: var(--accent-cyan);" title="Open Driver Mobile App">
+          <i data-lucide="smartphone" style="width: 13px; height: 13px; color: var(--accent-cyan);"></i>
+          <span>Driver App</span>
+        </a>
+
         <div id="connection-badge" class="status-pill">
           <span class="status-indicator"></span>
           <span id="connection-text">Live Sync</span>
@@ -47,7 +52,11 @@
         </button>
 
         <button id="qr-modal-btn" class="btn-ghost-icon" title="Mobile QR Pair">
-          <i data-lucide="smartphone" style="width: 16px; height: 16px;"></i>
+          <i data-lucide="qr-code" style="width: 16px; height: 16px;"></i>
+        </button>
+
+        <button id="auth-pc-btn" class="btn-ghost-icon" title="Civic Officer Access">
+          <i data-lucide="shield-check" style="width: 16px; height: 16px;"></i>
         </button>
       </div>
     </header>
@@ -247,19 +256,19 @@
 
         <div class="sheet-data-grid">
           <div class="data-card-cell">
-            <div class="cell-caption">Impact Force</div>
+            <div class="cell-caption">Avg Impact Force</div>
             <div id="sheet-peak-g" class="cell-figure">1.82 g</div>
           </div>
           <div class="data-card-cell">
-            <div class="cell-caption">Velocity</div>
+            <div class="cell-caption">Avg Velocity</div>
             <div id="sheet-speed" class="cell-figure">38 km/h</div>
           </div>
           <div class="data-card-cell">
-            <div class="cell-caption">Confidence</div>
+            <div class="cell-caption">Statistical Confidence</div>
             <div id="sheet-conf" class="cell-figure">94%</div>
           </div>
           <div class="data-card-cell">
-            <div class="cell-caption">Verifications</div>
+            <div class="cell-caption">Crowd Confirmations</div>
             <div id="sheet-verified" class="cell-figure">14 units</div>
           </div>
         </div>
@@ -391,6 +400,38 @@
         <div id="tickets-container" class="ticket-list">
           <div style="text-align: center; color: var(--foreground-dim); padding: 30px;">Loading civic tickets...</div>
         </div>
+      </div>
+    </div>
+
+    <!-- PC Civic Command Center Auth Modal -->
+    <div id="pc-auth-modal" class="dialog-backdrop">
+      <div class="dialog-window" style="max-width: 420px;">
+        <div class="dialog-header">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <i data-lucide="shield-check" style="width: 18px; height: 18px; color: var(--accent-cyan);"></i>
+            <h3 class="dialog-title">Civic Command Authentication</h3>
+          </div>
+          <button id="close-pc-auth-btn" class="btn-ghost-icon">
+            <i data-lucide="x" style="width: 16px; height: 16px;"></i>
+          </button>
+        </div>
+
+        <p style="color: var(--foreground-muted); font-size: 0.82rem; margin: 10px 0 16px;">
+          Sign in as a verified municipal road officer or infrastructure supervisor.
+        </p>
+
+        <form id="pc-auth-form" style="display: flex; flex-direction: column; gap: 12px;">
+          <div>
+            <label style="font-size: 0.75rem; color: var(--foreground-muted); font-weight: 600;">Officer Username / Email</label>
+            <input type="text" id="pc-auth-user" class="field-input" placeholder="admin or officer email" style="width: 100%; margin-top: 4px;" required autocomplete="username">
+          </div>
+          <div>
+            <label style="font-size: 0.75rem; color: var(--foreground-muted); font-weight: 600;">Password</label>
+            <input type="password" id="pc-auth-pass" class="field-input" placeholder="••••••••" style="width: 100%; margin-top: 4px;" required autocomplete="current-password">
+          </div>
+          <div id="pc-auth-err" style="color: var(--status-rose); font-size: 0.75rem; display: none;"></div>
+          <button type="submit" class="btn-launch" style="margin-top: 6px;">Sign In to Command Center</button>
+        </form>
       </div>
     </div>
   </div>

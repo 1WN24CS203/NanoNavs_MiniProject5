@@ -141,18 +141,59 @@ function initMap() {
   }
 }
 
-// ── WebSocket Real-Time Universal Hub ────────────────────────────────────────
+// ── WebSocket Real-Time Universal Hub & Serverless Polling Fallback ──────────
+
+let pollingFallbackTimer = null;
+
+function startPollingFallback() {
+  if (pollingFallbackTimer) return;
+  const badge = document.getElementById('connection-badge');
+  const txt = document.getElementById('connection-text');
+  if (badge) badge.className = 'status-pill';
+  if (txt) txt.innerText = 'Cloud Sync';
+
+  pollingFallbackTimer = setInterval(async () => {
+    try {
+      // 1. Fetch active fleet drivers (Vercel / Cloud serverless mode)
+      const resDrivers = await fetch('/api/drivers');
+      if (resDrivers.ok) {
+        const dataDrivers = await resDrivers.json();
+        updateActiveDriversBadge(dataDrivers.count || 0);
+        if (dataDrivers.drivers) {
+          dataDrivers.drivers.forEach(d => {
+            if (d.user_id !== state.clientId) renderPeerDriver(d);
+          });
+        }
+      }
+
+      // 2. Refresh stats
+      const resStats = await fetch('/api/stats');
+      if (resStats.ok) {
+        const stats = await resStats.json();
+        if (stats.active_drivers !== undefined) {
+          updateActiveDriversBadge(stats.active_drivers);
+        }
+      }
+    } catch (e) {
+      // Resilient to jitter
+    }
+  }, 3500);
+}
 
 function initWebSocket() {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const wsUrl = `${protocol}//${window.location.host}/ws/${state.clientId}`;
+  let wsConnected = false;
 
   try {
     ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {
-      document.getElementById('connection-badge').className = 'badge live';
-      document.getElementById('connection-text').innerText = 'Live Universal';
+      wsConnected = true;
+      const b = document.getElementById('connection-badge');
+      const t = document.getElementById('connection-text');
+      if (b) b.className = 'status-pill live';
+      if (t) t.innerText = 'Live Hub';
     };
 
     ws.onmessage = (event) => {
@@ -165,17 +206,24 @@ function initWebSocket() {
     };
 
     ws.onclose = () => {
-      document.getElementById('connection-badge').className = 'badge';
-      document.getElementById('connection-text').innerText = 'Reconnecting...';
-      setTimeout(initWebSocket, 3000);
+      if (!wsConnected) {
+        startPollingFallback();
+      } else {
+        setTimeout(initWebSocket, 4000);
+      }
     };
 
     ws.onerror = () => {
-      ws.close();
+      startPollingFallback();
     };
   } catch (e) {
-    console.warn('WebSocket connection failed:', e);
+    startPollingFallback();
   }
+
+  // Gracefully fallback to polling on serverless cloud platforms (e.g. Vercel)
+  setTimeout(() => {
+    if (!wsConnected) startPollingFallback();
+  }, 2500);
 }
 
 function handleWebSocketMessage(msg) {
@@ -340,10 +388,10 @@ function openAnomalySheet(anomaly) {
   document.getElementById('sheet-type-text').innerText = `${anomaly.anomaly_type.replace('_', ' ').toUpperCase()} DEFECT`;
   
   document.getElementById('sheet-address').innerText = anomaly.address || `${anomaly.latitude.toFixed(5)}, ${anomaly.longitude.toFixed(5)}`;
-  document.getElementById('sheet-peak-g').innerText = `${anomaly.peak_vertical_g.toFixed(2)} g`;
-  document.getElementById('sheet-speed').innerText = `${Math.round(anomaly.vehicle_speed_kmh || 0)} km/h`;
+  document.getElementById('sheet-peak-g').innerText = `${anomaly.peak_vertical_g.toFixed(2)} g (Avg)`;
+  document.getElementById('sheet-speed').innerText = `${Math.round(anomaly.vehicle_speed_kmh || 0)} km/h (Avg)`;
   document.getElementById('sheet-conf').innerText = `${Math.round(anomaly.confidence * 100)}%`;
-  document.getElementById('sheet-verified').innerText = `${anomaly.verified_count || 1} units`;
+  document.getElementById('sheet-verified').innerText = `${anomaly.verified_count || 1} units confirmed`;
 
   sheet.currentAnomalyId = anomaly.anomaly_id;
   sheet.classList.add('open');
@@ -1359,6 +1407,53 @@ function initUIEventListeners() {
       setTimeout(() => btn.innerText = 'Copy', 2000);
     });
   });
+
+  // PC Civic Auth Modal
+  const pcAuthBtn = document.getElementById('auth-pc-btn');
+  if (pcAuthBtn) {
+    pcAuthBtn.addEventListener('click', () => {
+      document.getElementById('pc-auth-modal').classList.add('open');
+      if (window.lucide) window.lucide.createIcons();
+    });
+  }
+
+  const closePcAuth = document.getElementById('close-pc-auth-btn');
+  if (closePcAuth) {
+    closePcAuth.addEventListener('click', () => {
+      document.getElementById('pc-auth-modal').classList.remove('open');
+    });
+  }
+
+  const pcAuthForm = document.getElementById('pc-auth-form');
+  if (pcAuthForm) {
+    pcAuthForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const errEl = document.getElementById('pc-auth-err');
+      errEl.style.display = 'none';
+      const u = document.getElementById('pc-auth-user').value.trim();
+      const p = document.getElementById('pc-auth-pass').value;
+
+      try {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username_or_email: u, password: p })
+        });
+        const data = await res.json();
+        if (res.ok && data.token) {
+          localStorage.setItem('nanonavs_pc_token', data.token);
+          alert(`Authenticated as ${data.user.full_name} (${data.user.role.toUpperCase()})`);
+          document.getElementById('pc-auth-modal').classList.remove('open');
+        } else {
+          errEl.innerText = data.detail || 'Login failed';
+          errEl.style.display = 'block';
+        }
+      } catch (err) {
+        errEl.innerText = 'Network error contacting server.';
+        errEl.style.display = 'block';
+      }
+    });
+  }
 
   // Report Modal
   document.getElementById('close-report-btn').addEventListener('click', () => {

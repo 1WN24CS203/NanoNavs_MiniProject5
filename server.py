@@ -23,7 +23,7 @@ from typing import Dict, List, Optional, Set
 import httpx
 import uvicorn
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -211,7 +211,119 @@ class ComplaintRequest(BaseModel):
     department: Optional[str] = "Municipal Road Infrastructure / BBMP"
 
 
+class SignupRequest(BaseModel):
+    username: str
+    email: str
+    password: str
+    full_name: str
+    role: Optional[str] = "driver"
+
+
+class LoginRequest(BaseModel):
+    username_or_email: str
+    password: str
+
+
+class RedeemCouponRequest(BaseModel):
+    coupon_id: str
+
+
+def extract_current_user(request: Request) -> Optional[dict]:
+    """Helper to authenticate requests using Bearer token or token query param."""
+    auth = request.headers.get("Authorization", "")
+    token = None
+    if auth.startswith("Bearer "):
+        token = auth[7:].strip()
+    elif "token" in request.query_params:
+        token = request.query_params["token"]
+    if token:
+        return database.get_user_by_token(token)
+    return None
+
+
 # ── REST Endpoints ───────────────────────────────────────────────────────────
+
+# ── Authentication & Security Endpoints ─────────────────────────────────────
+
+@app.post("/api/auth/signup")
+async def auth_signup(req: SignupRequest):
+    """Registers a new driver or civic officer account and returns session token."""
+    user, err = database.create_user(
+        username=req.username,
+        email=req.email,
+        password=req.password,
+        full_name=req.full_name,
+        role=req.role or "driver",
+    )
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+    token = database.create_session(user["user_id"])
+    return {"status": "ok", "token": token, "user": user}
+
+
+@app.post("/api/auth/login")
+async def auth_login(req: LoginRequest):
+    """Authenticates credentials and returns user profile + session token."""
+    user = database.authenticate_user(req.username_or_email, req.password)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid username/email or password")
+    token = database.create_session(user["user_id"])
+    return {"status": "ok", "token": token, "user": user}
+
+
+@app.get("/api/auth/me")
+async def auth_me(request: Request):
+    """Returns profile for currently authenticated token."""
+    user = extract_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required or session expired")
+    return {"status": "ok", "user": user}
+
+
+@app.post("/api/auth/logout")
+async def auth_logout(request: Request):
+    """Destroys active session token."""
+    auth = request.headers.get("Authorization", "")
+    if auth.startswith("Bearer "):
+        database.delete_session(auth[7:].strip())
+    return {"status": "ok", "message": "Logged out successfully"}
+
+
+# ── Driver Rewards & Marketplace Endpoints ─────────────────────────────────
+
+@app.get("/api/rewards/coupons")
+async def list_rewards_coupons():
+    """Lists all available discount coupons in the marketplace."""
+    coupons = database.get_all_coupons()
+    return {"count": len(coupons), "coupons": coupons}
+
+
+@app.post("/api/rewards/redeem")
+async def redeem_reward_coupon(req: RedeemCouponRequest, request: Request):
+    """Redeems a coupon using driver's NanoPoints and generates a promo code."""
+    user = extract_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required to redeem coupons")
+    redeemed, err = database.redeem_coupon(user["user_id"], req.coupon_id)
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+    return {"status": "success", "redemption": redeemed}
+
+
+@app.get("/api/rewards/my-coupons")
+async def list_my_coupons(request: Request):
+    """Retrieves list of active/redeemed coupons with voucher promo codes."""
+    user = extract_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    my_coupons = database.get_user_coupons(user["user_id"])
+    return {"count": len(my_coupons), "coupons": my_coupons}
+
+
+@app.get("/api/drivers")
+async def list_active_drivers():
+    """Returns real-time fleet of active mobile phone drivers for universal map."""
+    return {"count": len(manager.active_drivers), "drivers": list(manager.active_drivers.values())}
 
 @app.get("/api/config")
 async def get_config():
@@ -649,6 +761,13 @@ async def end_trip(req: EndTripRequest):
     trip_frames.pop(trip_id, None)
     trip_metadata.pop(trip_id, None)
 
+    # Award driver reward points (10 pts per km + 25 pts per confirmed anomaly)
+    user_id = req.user_id or meta.get("user_id", "guest_driver")
+    points_earned = max(10, int(distance_km * 10) + (len(detected) * 25))
+    new_points_balance = None
+    if user_id and user_id != "guest_driver":
+        new_points_balance = database.award_user_points(user_id, points_earned, f"Trip {trip_id}")
+
     # Broadcast trip end
     await manager.broadcast({
         "type": "TRIP_ENDED",
@@ -662,6 +781,8 @@ async def end_trip(req: EndTripRequest):
         "status": "completed",
         "report": report.to_dict(),
         "saved_trip": saved_trip,
+        "points_earned": points_earned,
+        "new_points_balance": new_points_balance,
     }
 
 
@@ -820,6 +941,13 @@ if os.path.exists(STATIC_DIR):
 
     @app.get("/")
     async def serve_index():
+        return FileResponse(os.path.join(STATIC_DIR, "index.html"))
+
+    @app.get("/mobile")
+    async def serve_mobile():
+        mobile_file = os.path.join(STATIC_DIR, "mobile.html")
+        if os.path.exists(mobile_file):
+            return FileResponse(mobile_file)
         return FileResponse(os.path.join(STATIC_DIR, "index.html"))
 
     @app.get("/manifest.json")

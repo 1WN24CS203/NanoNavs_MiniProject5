@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#09090b">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="NanoNavs Driver">
+  <title>NanoNavs Driver — Mobile Edge Sensor Rig</title>
+  
+  <link rel="manifest" href="/manifest.json">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+  <link rel="stylesheet" href="/static/mobile.css">
+  
+  <!-- Lucide Vector Icons -->
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+</head>
+<body>
+
+  <div id="mobile-root">
+    <!-- Top Mobile Header -->
+    <header class="mobile-navbar">
+      <div class="brand-group">
+        <div class="brand-badge-symbol">
+          <i data-lucide="activity" style="width: 14px; height: 14px; stroke-width: 2.4;"></i>
+        </div>
+        <div class="brand-titles">
+          <span class="brand-main">NanoNavs</span>
+          <span class="brand-sub">DRIVER RIG</span>
+        </div>
+      </div>
+
+      <div class="header-right">
+        <!-- Rewards Points Pill -->
+        <div id="driver-points-pill" class="points-pill" title="Tap to open Rewards Store">
+          <i data-lucide="coins" style="width: 13px; height: 13px; color: #fbbf24;"></i>
+          <span id="header-points-val">100 pts</span>
+        </div>
+
+        <!-- Sync Pill -->
+        <div id="driver-sync-pill" class="sync-pill" title="Central Cloud Engine Status">
+          <span class="sync-dot"></span>
+          <span id="driver-sync-text">Live</span>
+        </div>
+
+        <!-- Profile/Auth Trigger -->
+        <button id="btn-auth-profile" class="icon-btn" title="Driver Profile">
+          <i data-lucide="user" style="width: 15px; height: 15px;"></i>
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Mobile Content Stage (Tabbed) -->
+    <main class="mobile-main">
+      
+      <!-- TAB 1: COCKPIT / DRIVING HUD -->
+      <section id="tab-cockpit" class="tab-view active">
+        <!-- Route / Mission Quick Bar -->
+        <div class="cockpit-mission-bar">
+          <div class="mission-mode-indicator">
+            <i data-lucide="navigation" style="width: 14px; height: 14px; color: var(--accent-cyan);"></i>
+            <span id="cockpit-mode-label">Free Roam Telemetry Stream</span>
+          </div>
+          <span class="gps-accuracy-badge" id="gps-accuracy-label">GPS: Standby</span>
+        </div>
+
+        <!-- Large Speedometer Display -->
+        <div class="speedometer-cluster">
+          <div class="speedometer-ring">
+            <span id="mobile-hud-speed" class="speed-num">0</span>
+            <span class="speed-label">KM / H</span>
+          </div>
+          
+          <div class="edge-hardware-grid">
+            <div class="hardware-cell">
+              <span class="hw-label">Vertical G</span>
+              <span id="mobile-hud-g" class="hw-value">1.00g</span>
+            </div>
+            <div class="hardware-cell">
+              <span class="hw-label">Gyro Rad/s</span>
+              <span id="mobile-hud-gyro" class="hw-value">0.00</span>
+            </div>
+            <div class="hardware-cell">
+              <span class="hw-label">Acoustic dB</span>
+              <span id="mobile-hud-db" class="hw-value">-- dB</span>
+            </div>
+            <div class="hardware-cell">
+              <span class="hw-label">Road Score</span>
+              <span id="mobile-hud-score" class="hw-value quality-good">100</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Real-Time Waveform Oscilloscope -->
+        <div class="mobile-oscilloscope-card">
+          <div class="osc-header">
+            <span>EDGE SENSOR WAVEFORM [Z-AXIS 10Hz]</span>
+            <span id="mobile-packets-label">0 pkts streamed</span>
+          </div>
+          <canvas id="mobileOscilloscope" height="55"></canvas>
+        </div>
+
+        <!-- Phone-Handling Guard Alert Banner -->
+        <div id="mobile-guard-alert" class="mobile-guard-banner">
+          <i data-lucide="shield-alert" style="width: 14px; height: 14px;"></i>
+          <span>Handling motion detected — anomaly trigger suppressed</span>
+        </div>
+
+        <!-- Mini Live Route View -->
+        <div class="mini-map-container">
+          <div id="mobile-mini-map"></div>
+          <div class="mini-map-overlay-tag">
+            <i data-lucide="crosshair" style="width: 11px; height: 11px;"></i>
+            <span>Forward Bearing Tracking</span>
+          </div>
+        </div>
+
+        <!-- Cockpit Primary Actions -->
+        <div class="cockpit-actions">
+          <button id="btn-mobile-flag" class="btn-flag-hazard" disabled>
+            <i data-lucide="alert-triangle" style="width: 16px; height: 16px;"></i>
+            Flag Hazard (+25 pts)
+          </button>
+          
+          <button id="btn-mobile-toggle-trip" class="btn-main-trip">
+            <i data-lucide="play" id="btn-trip-icon" style="width: 16px; height: 16px; fill: currentColor;"></i>
+            <span id="btn-trip-text">START TRIP</span>
+          </button>
+        </div>
+      </section>
+
+      <!-- TAB 2: UNIVERSAL MAP -->
+      <section id="tab-map" class="tab-view">
+        <div class="full-map-wrapper">
+          <div id="mobile-full-map"></div>
+          <div class="map-controls-floating">
+            <button id="btn-map-recenter" class="map-floating-btn" title="Center on Vehicle">
+              <i data-lucide="crosshair" style="width: 18px; height: 18px;"></i>
+            </button>
+            <button id="btn-map-refresh" class="map-floating-btn" title="Refresh Hazards">
+              <i data-lucide="refresh-cw" style="width: 18px; height: 18px;"></i>
+            </button>
+          </div>
+          <div class="map-legend-capsule">
+            <span class="legend-dot red"></span><span>Critical</span>
+            <span class="legend-dot amber"></span><span>Bump</span>
+            <span class="legend-dot blue"></span><span>Crack</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 3: REWARDS & COUPONS MARKETPLACE -->
+      <section id="tab-rewards" class="tab-view">
+        <!-- Rewards Hero Banner -->
+        <div class="rewards-hero">
+          <div class="rewards-balance-group">
+            <span class="rewards-sub">Accumulated Driver Balance</span>
+            <div class="rewards-big-score">
+              <i data-lucide="coins" style="width: 24px; height: 24px; color: #fbbf24;"></i>
+              <span id="rewards-balance-val">100</span>
+              <span class="rewards-unit">pts</span>
+            </div>
+          </div>
+          <div class="rewards-earn-rules">
+            <div class="rule-chip"><i data-lucide="navigation" style="width: 11px; height: 11px;"></i> +10 pts / km</div>
+            <div class="rule-chip"><i data-lucide="alert-circle" style="width: 11px; height: 11px;"></i> +25 pts / hazard</div>
+            <div class="rule-chip"><i data-lucide="check" style="width: 11px; height: 11px;"></i> +100 welcome</div>
+          </div>
+        </div>
+
+        <!-- Segmented Tab: Store vs My Vouchers -->
+        <div class="segmented-control">
+          <button class="seg-btn active" id="seg-store-btn">Voucher Store</button>
+          <button class="seg-btn" id="seg-vouchers-btn">My Active Vouchers (<span id="my-vouchers-count">0</span>)</button>
+        </div>
+
+        <!-- Store View -->
+        <div id="rewards-store-view" class="coupons-grid">
+          <div class="loading-state">Loading reward vouchers...</div>
+        </div>
+
+        <!-- My Vouchers View -->
+        <div id="rewards-vouchers-view" class="coupons-grid" style="display: none;">
+          <div class="loading-state">You have not redeemed any vouchers yet. Earn points by driving to claim coupons!</div>
+        </div>
+      </section>
+
+      <!-- TAB 4: PROFILE & STATS -->
+      <section id="tab-profile" class="tab-view">
+        <div class="profile-card">
+          <div class="profile-avatar">
+            <i data-lucide="user-check" style="width: 28px; height: 28px; color: var(--accent-cyan);"></i>
+          </div>
+          <h3 id="profile-name-val" class="profile-name">Rahul Sharma</h3>
+          <span id="profile-email-val" class="profile-email">driver@nanonavs.com</span>
+          <span id="profile-role-badge" class="role-badge">Verified Driver</span>
+        </div>
+
+        <div class="profile-stats-grid">
+          <div class="stat-box">
+            <span class="stat-num" id="profile-km-val">0.0</span>
+            <span class="stat-title">KM Contributed</span>
+          </div>
+          <div class="stat-box">
+            <span class="stat-num" id="profile-anom-val">0</span>
+            <span class="stat-title">Hazards Flagged</span>
+          </div>
+          <div class="stat-box">
+            <span class="stat-num" id="profile-points-val">100</span>
+            <span class="stat-title">NanoPoints Balance</span>
+          </div>
+        </div>
+
+        <div class="profile-menu">
+          <button id="btn-desktop-switch" class="menu-item-btn">
+            <i data-lucide="monitor" style="width: 16px; height: 16px;"></i>
+            <span>Switch to PC Command Center</span>
+            <i data-lucide="chevron-right" style="width: 14px; height: 14px; margin-left: auto;"></i>
+          </button>
+
+          <button id="btn-mobile-logout" class="menu-item-btn danger">
+            <i data-lucide="log-out" style="width: 16px; height: 16px;"></i>
+            <span>Sign Out</span>
+          </button>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- Bottom Navigation Bar -->
+    <nav class="mobile-bottom-nav">
+      <button class="nav-item active" data-tab="tab-cockpit">
+        <i data-lucide="gauge" class="nav-icon"></i>
+        <span>Cockpit</span>
+      </button>
+      <button class="nav-item" data-tab="tab-map">
+        <i data-lucide="map" class="nav-icon"></i>
+        <span>Road Map</span>
+      </button>
+      <button class="nav-item" data-tab="tab-rewards">
+        <i data-lucide="gift" class="nav-icon"></i>
+        <span>Rewards</span>
+      </button>
+      <button class="nav-item" data-tab="tab-profile">
+        <i data-lucide="user" class="nav-icon"></i>
+        <span>Profile</span>
+      </button>
+    </nav>
+
+    <!-- AUTHENTICATION MODAL (LOGIN / SIGNUP) -->
+    <div id="auth-modal" class="mobile-modal-backdrop">
+      <div class="mobile-modal-sheet">
+        <div class="sheet-grabber"></div>
+        
+        <div class="auth-header">
+          <div class="brand-badge-symbol" style="margin: 0 auto 10px;">
+            <i data-lucide="shield-check" style="width: 18px; height: 18px; color: var(--accent-cyan);"></i>
+          </div>
+          <h2 id="auth-title">Driver Sign In</h2>
+          <p id="auth-desc" class="auth-sub">Access your telemetry rig and redeem driving rewards</p>
+        </div>
+
+        <div class="auth-tabs">
+          <button id="tab-login-btn" class="auth-tab-btn active">Login</button>
+          <button id="tab-signup-btn" class="auth-tab-btn">Sign Up (+100 pts)</button>
+        </div>
+
+        <form id="auth-form" class="auth-form-stack">
+          <!-- Full Name (Signup only) -->
+          <div id="auth-name-field" class="input-field-wrap" style="display: none;">
+            <label class="field-lbl">Full Name</label>
+            <input type="text" id="auth-fullname-input" class="field-inp" placeholder="e.g. Rahul Sharma">
+          </div>
+
+          <!-- Username / Email -->
+          <div class="input-field-wrap">
+            <label class="field-lbl" id="auth-identity-lbl">Username or Email</label>
+            <input type="text" id="auth-identity-input" class="field-inp" placeholder="Enter username or email" required autocomplete="username">
+          </div>
+
+          <!-- Email (Signup only) -->
+          <div id="auth-email-field" class="input-field-wrap" style="display: none;">
+            <label class="field-lbl">Email Address</label>
+            <input type="email" id="auth-email-input" class="field-inp" placeholder="name@domain.com">
+          </div>
+
+          <!-- Password -->
+          <div class="input-field-wrap">
+            <label class="field-lbl">Password</label>
+            <input type="password" id="auth-password-input" class="field-inp" placeholder="••••••••" required autocomplete="current-password">
+          </div>
+
+          <div id="auth-error-msg" class="auth-error" style="display: none;"></div>
+
+          <button type="submit" id="btn-auth-submit" class="btn-auth-action">
+            Sign In
+          </button>
+          
+          <button type="button" id="btn-auth-guest" class="btn-ghost-cancel">
+            Continue as Guest Driver
+          </button>
+        </form>
+      </div>
+    </div>
+
+    <!-- TRIP COMPLETED REPORT MODAL -->
+    <div id="mobile-report-modal" class="mobile-modal-backdrop">
+      <div class="mobile-modal-sheet" style="text-align: center;">
+        <div class="sheet-grabber"></div>
+        
+        <div class="report-badge-reward">
+          <i data-lucide="check-circle-2" style="width: 32px; height: 32px; color: var(--status-emerald);"></i>
+        </div>
+        
+        <h3 class="dialog-heading">Mission Concluded</h3>
+        <p class="dialog-sub">Telemetry processed by Central Server</p>
+
+        <!-- Points Earned Hero -->
+        <div class="points-reward-card">
+          <span class="pts-caption">Rewards Earned This Trip</span>
+          <div class="pts-big-num">
+            <i data-lucide="plus" style="width: 18px; height: 18px; color: #fbbf24;"></i>
+            <span id="report-earned-pts">35</span>
+            <span class="pts-label">pts</span>
+          </div>
+          <span id="report-new-balance" class="pts-sub">New Balance: 135 pts</span>
+        </div>
+
+        <div class="report-metrics-grid">
+          <div class="report-metric">
+            <span class="rep-lbl">Distance</span>
+            <span id="rep-dist-val" class="rep-val">0.0 km</span>
+          </div>
+          <div class="report-metric">
+            <span class="rep-lbl">Road Score</span>
+            <span id="rep-score-val" class="rep-val quality-good">100</span>
+          </div>
+          <div class="report-metric">
+            <span class="rep-lbl">Hazards</span>
+            <span id="rep-anom-val" class="rep-val">0</span>
+          </div>
+        </div>
+
+        <button id="btn-close-report" class="btn-auth-action" style="margin-top: 18px;">
+          Done & Collect Points
+        </button>
+      </div>
+    </div>
+
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script src="/static/audio-keepalive.js"></script>
+  <script src="/static/mobile.js"></script>
+</body>
+</html>

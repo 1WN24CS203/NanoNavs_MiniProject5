@@ -7,17 +7,23 @@ Provides thread-safe SQLite persistence for:
 - Real-time deduplication and crowd verification (merging duplicate reports within 20m)
 """
 
+import hashlib
 import json
 import math
 import os
+import secrets
 import sqlite3
 import time
+import uuid
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
 from models import AnomalyType, DetectedAnomaly, GPSCoordinate, IncidentReport, SeverityLevel
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "nanonavs.db")
+if os.environ.get("VERCEL") or os.environ.get("AWS_LAMBDA_FUNCTION_NAME"):
+    DB_PATH = "/tmp/nanonavs.db"
+else:
+    DB_PATH = os.path.join(os.path.dirname(__file__), "nanonavs.db")
 
 
 def get_db_connection() -> sqlite3.Connection:
@@ -30,6 +36,60 @@ def init_db():
     """Initialize database tables and seed baseline anomalies if empty."""
     conn = get_db_connection()
     cursor = conn.cursor()
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS users (
+        user_id TEXT PRIMARY KEY,
+        username TEXT UNIQUE NOT NULL,
+        email TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        salt TEXT NOT NULL,
+        full_name TEXT NOT NULL,
+        role TEXT DEFAULT 'driver',
+        points_balance INTEGER DEFAULT 100,
+        km_driven REAL DEFAULT 0.0,
+        anomalies_reported INTEGER DEFAULT 0,
+        created_at TEXT NOT NULL
+    );
+    """)
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS sessions (
+        token TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        created_at REAL NOT NULL,
+        expires_at REAL NOT NULL,
+        FOREIGN KEY(user_id) REFERENCES users(user_id)
+    );
+    """)
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS coupons (
+        coupon_id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        brand TEXT NOT NULL,
+        category TEXT NOT NULL,
+        points_cost INTEGER NOT NULL,
+        discount_val TEXT NOT NULL,
+        description TEXT NOT NULL,
+        icon TEXT NOT NULL,
+        expiry_days INTEGER DEFAULT 30
+    );
+    """)
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS user_coupons (
+        redemption_id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        coupon_id TEXT NOT NULL,
+        promo_code TEXT UNIQUE NOT NULL,
+        status TEXT DEFAULT 'ACTIVE',
+        redeemed_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        FOREIGN KEY(user_id) REFERENCES users(user_id),
+        FOREIGN KEY(coupon_id) REFERENCES coupons(coupon_id)
+    );
+    """)
 
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS anomalies (
@@ -97,8 +157,24 @@ def init_db():
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_anomaly_type ON anomalies(anomaly_type);")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_anomaly_status ON anomalies(status);")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_complaint_status ON complaints(status);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token);")
 
     conn.commit()
+
+    # Seed if users table is empty
+    cursor.execute("SELECT COUNT(*) as count FROM users;")
+    user_count = cursor.fetchone()["count"]
+    if user_count == 0:
+        seed_baseline_users(cursor)
+        conn.commit()
+
+    # Seed if coupons table is empty
+    cursor.execute("SELECT COUNT(*) as count FROM coupons;")
+    coupon_count = cursor.fetchone()["count"]
+    if coupon_count == 0:
+        seed_baseline_coupons(cursor)
+        conn.commit()
 
     # Seed if anomalies table is empty
     cursor.execute("SELECT COUNT(*) as count FROM anomalies;")
@@ -169,21 +245,41 @@ def insert_or_update_anomaly(
         dist = haversine_m(lat, lon, row["latitude"], row["longitude"])
         if dist <= 25.0:  # Within 25 meters: crowd-verified match!
             new_count = row["verified_count"] + 1
-            new_conf = min(0.99, row["confidence"] + 0.05)
-            new_peak_g = max(row["peak_vertical_g"], anomaly.peak_vertical_g)
+            prev_n = row["verified_count"]
+
+            # Multi-pass statistical running averages to confirm anomaly:
+            avg_peak_g = round(((row["peak_vertical_g"] * prev_n) + anomaly.peak_vertical_g) / new_count, 3)
+            new_speed = anomaly.vehicle_speed_kmh or 0.0
+            avg_speed = round(((row["vehicle_speed_kmh"] * prev_n) + new_speed) / new_count, 1)
+            new_acoustic = anomaly.peak_acoustic_db or 0.0
+            avg_acoustic = round(((row["peak_acoustic_db"] * prev_n) + new_acoustic) / new_count, 1)
+            avg_lat = round(((row["latitude"] * prev_n) + lat) / new_count, 6)
+            avg_lon = round(((row["longitude"] * prev_n) + lon) / new_count, 6)
+
+            # Mathematical confirmation: multiple independent passes verify the defect
+            new_status = 'verified'
+            new_conf = min(0.99, round(0.60 + 0.12 * min(new_count, 3), 2))
+
             cursor.execute(
                 """
                 UPDATE anomalies
-                SET verified_count = ?, confidence = ?, peak_vertical_g = ?, status = 'verified'
+                SET verified_count = ?, confidence = ?, peak_vertical_g = ?,
+                    vehicle_speed_kmh = ?, peak_acoustic_db = ?,
+                    latitude = ?, longitude = ?, status = ?
                 WHERE anomaly_id = ?
                 """,
-                (new_count, new_conf, new_peak_g, row["anomaly_id"]),
+                (new_count, new_conf, avg_peak_g, avg_speed, avg_acoustic, avg_lat, avg_lon, new_status, row["anomaly_id"]),
             )
             conn.commit()
             updated_row = dict(row)
             updated_row["verified_count"] = new_count
             updated_row["confidence"] = new_conf
-            updated_row["status"] = "verified"
+            updated_row["peak_vertical_g"] = avg_peak_g
+            updated_row["vehicle_speed_kmh"] = avg_speed
+            updated_row["peak_acoustic_db"] = avg_acoustic
+            updated_row["latitude"] = avg_lat
+            updated_row["longitude"] = avg_lon
+            updated_row["status"] = new_status
             conn.close()
             return updated_row, False
 
@@ -630,6 +726,368 @@ def seed_baseline_complaints(cursor: sqlite3.Cursor):
                 defect_type, latitude, longitude, address, city,
                 department, description, ai_narrative, status, created_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            c,
+        )
+
+
+# ── User Authentication & Security ──────────────────────────────────────────
+
+def hash_password(password: str, salt: Optional[str] = None) -> Tuple[str, str]:
+    """Generates a secure salted PBKDF2-HMAC-SHA256 password hash."""
+    if not salt:
+        salt = secrets.token_hex(16)
+    pw_hash = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), 100000).hex()
+    return pw_hash, salt
+
+
+def create_user(
+    username: str,
+    email: str,
+    password: str,
+    full_name: str,
+    role: str = "driver",
+) -> Tuple[Optional[dict], Optional[str]]:
+    """Creates a new user with salted credentials and 100 welcome reward points."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    username = username.strip().lower()
+    email = email.strip().lower()
+
+    cursor.execute("SELECT * FROM users WHERE username = ? OR email = ?", (username, email))
+    if cursor.fetchone():
+        conn.close()
+        return None, "Username or email is already registered."
+
+    user_id = f"USR-{uuid.uuid4().hex[:10].upper()}"
+    pw_hash, salt = hash_password(password)
+    now_str = datetime.now().isoformat()
+    welcome_points = 100
+
+    cursor.execute(
+        """
+        INSERT INTO users (
+            user_id, username, email, password_hash, salt,
+            full_name, role, points_balance, km_driven,
+            anomalies_reported, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0.0, 0, ?)
+        """,
+        (user_id, username, email, pw_hash, salt, full_name, role, welcome_points, now_str),
+    )
+    conn.commit()
+
+    cursor.execute("SELECT user_id, username, email, full_name, role, points_balance, km_driven, anomalies_reported, created_at FROM users WHERE user_id = ?", (user_id,))
+    user = dict(cursor.fetchone())
+    conn.close()
+    return user, None
+
+
+def authenticate_user(username_or_email: str, password: str) -> Optional[dict]:
+    """Validates user credentials and returns safe user profile dict."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    target = username_or_email.strip().lower()
+    cursor.execute("SELECT * FROM users WHERE username = ? OR email = ?", (target, target))
+    row = cursor.fetchone()
+    if not row:
+        conn.close()
+        return None
+
+    pw_hash, _ = hash_password(password, salt=row["salt"])
+    if pw_hash != row["password_hash"]:
+        conn.close()
+        return None
+
+    user = {
+        "user_id": row["user_id"],
+        "username": row["username"],
+        "email": row["email"],
+        "full_name": row["full_name"],
+        "role": row["role"],
+        "points_balance": row["points_balance"],
+        "km_driven": row["km_driven"],
+        "anomalies_reported": row["anomalies_reported"],
+        "created_at": row["created_at"],
+    }
+    conn.close()
+    return user
+
+
+def create_session(user_id: str, days: int = 30) -> str:
+    """Generates an authenticated session token for the user."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    token = secrets.token_hex(32)
+    now = time.time()
+    expires_at = now + (days * 86400)
+
+    cursor.execute(
+        "INSERT INTO sessions (token, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
+        (token, user_id, now, expires_at),
+    )
+    conn.commit()
+    conn.close()
+    return token
+
+
+def get_user_by_token(token: str) -> Optional[dict]:
+    """Retrieves authenticated user profile given an active session token."""
+    if not token:
+        return None
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    now = time.time()
+    cursor.execute("SELECT * FROM sessions WHERE token = ? AND expires_at > ?", (token, now))
+    session = cursor.fetchone()
+    if not session:
+        conn.close()
+        return None
+
+    cursor.execute("SELECT user_id, username, email, full_name, role, points_balance, km_driven, anomalies_reported, created_at FROM users WHERE user_id = ?", (session["user_id"],))
+    row = cursor.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def delete_session(token: str):
+    """Logs out user by destroying the session token."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM sessions WHERE token = ?", (token,))
+    conn.commit()
+    conn.close()
+
+
+def get_user_by_id(user_id: str) -> Optional[dict]:
+    """Retrieves user profile by ID."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT user_id, username, email, full_name, role, points_balance, km_driven, anomalies_reported, created_at FROM users WHERE user_id = ?", (user_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+# ── Rewards & Coupon Marketplace ─────────────────────────────────────────────
+
+def get_all_coupons() -> List[dict]:
+    """Returns list of all available coupons in the marketplace."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM coupons ORDER BY points_cost ASC")
+    rows = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+    return rows
+
+
+def redeem_coupon(user_id: str, coupon_id: str) -> Tuple[Optional[dict], Optional[str]]:
+    """
+    Redeems a coupon using user's accumulated NanoPoints.
+    Deducts points and generates a unique promo code.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    # Get user
+    cursor.execute("SELECT points_balance FROM users WHERE user_id = ?", (user_id,))
+    user_row = cursor.fetchone()
+    if not user_row:
+        conn.close()
+        return None, "User not found."
+
+    # Get coupon
+    cursor.execute("SELECT * FROM coupons WHERE coupon_id = ?", (coupon_id,))
+    coupon = cursor.fetchone()
+    if not coupon:
+        conn.close()
+        return None, "Coupon not found."
+
+    cost = coupon["points_cost"]
+    current_pts = user_row["points_balance"]
+    if current_pts < cost:
+        conn.close()
+        return None, f"Insufficient points. You need {cost} pts, but have {current_pts} pts."
+
+    # Deduct points
+    new_balance = current_pts - cost
+    cursor.execute("UPDATE users SET points_balance = ? WHERE user_id = ?", (new_balance, user_id))
+
+    # Generate redemption code
+    redemption_id = f"RDM-{uuid.uuid4().hex[:10].upper()}"
+    code_suffix = secrets.token_hex(3).upper()
+    prefix = coupon["title"][:4].upper().replace("₹", "").replace(" ", "")
+    promo_code = f"NANONAV-{prefix}-{code_suffix}"
+    now_str = datetime.now().isoformat()
+    expiry_str = datetime.fromtimestamp(time.time() + (coupon["expiry_days"] * 86400)).isoformat()
+
+    cursor.execute(
+        """
+        INSERT INTO user_coupons (
+            redemption_id, user_id, coupon_id, promo_code,
+            status, redeemed_at, expires_at
+        ) VALUES (?, ?, ?, ?, 'ACTIVE', ?, ?)
+        """,
+        (redemption_id, user_id, coupon_id, promo_code, now_str, expiry_str),
+    )
+    conn.commit()
+
+    redeemed = {
+        "redemption_id": redemption_id,
+        "coupon_id": coupon_id,
+        "title": coupon["title"],
+        "brand": coupon["brand"],
+        "discount_val": coupon["discount_val"],
+        "promo_code": promo_code,
+        "status": "ACTIVE",
+        "redeemed_at": now_str,
+        "expires_at": expiry_str,
+        "points_cost": cost,
+        "new_points_balance": new_balance,
+    }
+    conn.close()
+    return redeemed, None
+
+
+def get_user_coupons(user_id: str) -> List[dict]:
+    """Returns list of coupons redeemed by a specific user with promo codes."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT uc.redemption_id, uc.promo_code, uc.status, uc.redeemed_at, uc.expires_at,
+               c.coupon_id, c.title, c.brand, c.category, c.discount_val, c.description, c.icon
+        FROM user_coupons uc
+        JOIN coupons c ON uc.coupon_id = c.coupon_id
+        WHERE uc.user_id = ?
+        ORDER BY uc.redeemed_at DESC
+        """,
+        (user_id,),
+    )
+    rows = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+    return rows
+
+
+def award_user_points(user_id: str, points: int, reason: str = "") -> int:
+    """Awards driver reward points for telemetry contribution or driving."""
+    if not user_id or points <= 0:
+        return 0
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT points_balance FROM users WHERE user_id = ?", (user_id,))
+    row = cursor.fetchone()
+    if not row:
+        conn.close()
+        return 0
+
+    new_bal = row["points_balance"] + points
+    cursor.execute("UPDATE users SET points_balance = ? WHERE user_id = ?", (new_bal, user_id))
+    conn.commit()
+    conn.close()
+    return new_bal
+
+
+# ── Baseline Seeding ─────────────────────────────────────────────────────────
+
+def seed_baseline_users(cursor: sqlite3.Cursor):
+    """Seed initial administrator and sample driver accounts."""
+    now_str = datetime.now().isoformat()
+    # 1. Admin
+    admin_pw, admin_salt = hash_password("admin123")
+    cursor.execute(
+        """
+        INSERT OR IGNORE INTO users (
+            user_id, username, email, password_hash, salt,
+            full_name, role, points_balance, km_driven, anomalies_reported, created_at
+        ) VALUES ('USR-ADMIN-01', 'admin', 'admin@nanonavs.gov.in', ?, ?, 'BBMP Civic Operations Head', 'admin', 500, 120.0, 14, ?)
+        """,
+        (admin_pw, admin_salt, now_str),
+    )
+
+    # 2. Driver
+    driver_pw, driver_salt = hash_password("driver123")
+    cursor.execute(
+        """
+        INSERT OR IGNORE INTO users (
+            user_id, username, email, password_hash, salt,
+            full_name, role, points_balance, km_driven, anomalies_reported, created_at
+        ) VALUES ('USR-DRIVER-01', 'driver1', 'driver@nanonavs.com', ?, ?, 'Rahul Sharma', 'driver', 350, 48.2, 7, ?)
+        """,
+        (driver_pw, driver_salt, now_str),
+    )
+
+
+def seed_baseline_coupons(cursor: sqlite3.Cursor):
+    """Seed rewards marketplace coupons."""
+    sample_coupons = [
+        (
+            "CUP-FUEL-100",
+            "₹100 Fuel Cashback Voucher",
+            "HPCL / Indian Oil",
+            "Fuel",
+            200,
+            "₹100 OFF",
+            "Valid on petrol or diesel purchase of ₹500 or more at participating fuel pumps.",
+            "fuel",
+            30,
+        ),
+        (
+            "CUP-FASTAG-50",
+            "₹50 FASTag Toll Credit",
+            "NHAI / PayTM FASTag",
+            "Toll",
+            100,
+            "₹50 FREE",
+            "Instant top-up to your linked vehicle FASTag RFID pass for highway tolling.",
+            "navigation-2",
+            60,
+        ),
+        (
+            "CUP-COFFEE-50",
+            "50% Off Highway Brew",
+            "Third Wave Coffee / CCD",
+            "Food",
+            80,
+            "50% OFF",
+            "Enjoy 50% discount on any espresso or cold brew at participating drive-thrus.",
+            "coffee",
+            45,
+        ),
+        (
+            "CUP-WASH-200",
+            "₹200 Off Express Vehicle Spa",
+            "SpeedWash Auto Hub",
+            "Service",
+            250,
+            "₹200 OFF",
+            "Complete exterior pressure wash, high-density snow foam rinse, and tyre gloss.",
+            "sparkles",
+            30,
+        ),
+        (
+            "CUP-TYRE-FREE",
+            "Free Tyre Alignment & Nitrogen",
+            "Apollo / MRF Tyres",
+            "Service",
+            120,
+            "FREE SERVICE",
+            "Full 4-wheel laser alignment check and nitrogen tire inflation voucher.",
+            "disc",
+            60,
+        ),
+    ]
+
+    for c in sample_coupons:
+        cursor.execute(
+            """
+            INSERT OR IGNORE INTO coupons (
+                coupon_id, title, brand, category, points_cost,
+                discount_val, description, icon, expiry_days
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             c,
         )
